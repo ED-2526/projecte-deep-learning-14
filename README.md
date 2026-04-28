@@ -1,5 +1,5 @@
-# XN-Project title (replace it by the title of your project)
-Write here a short summary about your project. The text must include a short introduction and the targeted goals
+# Semantic Segmentation with Tumors
+This project focuses on detecting Invasive Ductal Carcinoma (IDC) on whole mount slide images and segmenting the regions where the tumor is present. We use a CNN-based approach for binary image classification at mask level, trained on the [BraTS2020 Dataset (Training + Validation)](https://www.med.upenn.edu/cbica/brats2020/data.html).
 
 ## Code structure
 You must create as many folders as you consider. You can use the proposed structure or replace it by the one in the base code that you use as starting point. Do not forget to add Markdown files as needed to explain well the code and how to use it.
@@ -20,8 +20,9 @@ python main.py
 
 
 ## Contributors
-Write here the name and UAB mail of the group members
+Laia Camara, Laia Alcalde, Elena Gutiérrez, Cristina Huanca
+<!-- TODO: add mail of the group members -->
 
 Xarxes Neuronals i Aprenentatge Profund
-Grau dÉnginyeria de Dades, 
+Grau d'Enginyeria de Dades,
 UAB, 2026
