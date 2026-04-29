@@ -32,6 +32,12 @@ print("Shape T1CE:", t1ce.shape)
 print("Shape T2:", t2.shape)
 print("Shape SEG:", seg.shape)
 
+"""
+240 = alçada de cada slice
+240 = amplada de cada slice
+155 = nombre de slices del volum
+"""
+
 print("Valors únics a la màscara SEG:", np.unique(seg))
 
 print("Valor mínim FLAIR:", np.min(flair))
