@@ -128,7 +128,7 @@ if __name__ == "__main__":
 
     config = {
         # Dataset
-        "root_dir": "/Users/laiaalcaldemaria/Desktop/descarga/archive/BraTS2020_TrainingData/MICCAI_BraTS2020_TrainingData",
+        "root_dir": os.environ.get("BRATS_ROOT","/Users/laiaalcaldemaria/Desktop/descarga/archive/BraTS2020_TrainingData/MICCAI_BraTS2020_TrainingData"),
         "modality": "flair",
         "only_tumor_slices": True,
 
