@@ -134,7 +134,7 @@ dmypy.json
 .idea/
 
 # Dataset
-data/
+data/data/
 *.nii
 *.nii.gz
 wandb/
