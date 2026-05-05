@@ -26,3 +26,14 @@ Laia Camara, Laia Alcalde, Elena Gutiérrez, Cristina Huanca
 Xarxes Neuronals i Aprenentatge Profund
 Grau d'Enginyeria de Dades,
 UAB, 2026
+
+## RESULTS BASELINE
+Baseline U-Net 2D, modality flair, only tumor slices
+Epochs: 5
+Batch size: 8
+Learning rate: 1e-4
+Train Dice: 0.8986
+Train IoU: 0.8177
+Validation Dice: 0.9057
+Validation IoU: 0.8285
+Validation Loss: 0.1089
