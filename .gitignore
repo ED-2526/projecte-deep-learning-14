@@ -137,6 +137,7 @@ dmypy.json
 data/data/
 *.nii
 *.nii.gz
+results/
 wandb/
 MNIST/
 results/models/
