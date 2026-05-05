@@ -1,4 +1,5 @@
 import os
+import json
 import random
 import numpy as np
 import torch
@@ -11,10 +12,21 @@ from utils.losses import BCEDiceLoss
 from models.unet import UNet
 from train import train, validate_one_epoch
 
+
 # -----------------------------
 # Reproductibilitat
 # -----------------------------
 def set_seed(seed=42):
+    """
+    Fixa les llavors aleatòries per intentar que els experiments siguin
+    el més reproduïbles possible.
+
+    Això afecta:
+        - random de Python
+        - NumPy
+        - PyTorch CPU
+        - PyTorch GPU
+    """
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
@@ -29,12 +41,24 @@ def get_case_ids(root_dir):
     Retorna la llista ordenada de pacients disponibles al dataset BraTS.
 
     Cada pacient és una carpeta del tipus:
-    BraTS20_Training_001, BraTS20_Training_002, etc.
+        BraTS20_Training_001
+        BraTS20_Training_002
+        ...
+
+    Aquesta funció només retorna els noms de les carpetes dels pacients.
+    Encara no carrega cap imatge.
     """
     case_ids = sorted([
         folder for folder in os.listdir(root_dir)
         if folder.startswith("BraTS20_Training_")
     ])
+
+    if len(case_ids) == 0:
+        raise ValueError(
+            f"No s'han trobat pacients a {root_dir}. "
+            "Comprova que la ruta sigui correcta i que les carpetes "
+            "comencin per 'BraTS20_Training_'."
+        )
 
     return case_ids
 
@@ -49,6 +73,16 @@ def split_case_ids(case_ids, train_split, val_split, seed):
     Important:
     Aquesta divisió es fa a nivell de pacient, no a nivell de slice.
     Això evita que slices del mateix pacient apareguin en més d'un conjunt.
+
+    Exemple del que volem evitar:
+        Train:
+            pacient A, slice 30
+            pacient A, slice 31
+        Validation:
+            pacient A, slice 32
+
+    Amb aquest split per pacient, totes les slices d'un mateix pacient
+    pertanyen exclusivament a train, validation o test.
     """
     case_ids = list(case_ids)
 
@@ -64,7 +98,8 @@ def split_case_ids(case_ids, train_split, val_split, seed):
     val_case_ids = case_ids[train_size:train_size + val_size]
     test_case_ids = case_ids[train_size + val_size:]
 
-    # Comprovació de seguretat: cap pacient pot aparèixer en més d'un split
+    # Comprovacions de seguretat:
+    # cap pacient pot aparèixer en més d'un split.
     assert set(train_case_ids).isdisjoint(set(val_case_ids))
     assert set(train_case_ids).isdisjoint(set(test_case_ids))
     assert set(val_case_ids).isdisjoint(set(test_case_ids))
@@ -87,6 +122,7 @@ def create_dataloaders(config):
         1. Obtenim tots els pacients.
         2. Dividim pacients en train/val/test.
         3. Creem un dataset separat per a cada grup de pacients.
+        4. Creem un DataLoader per a cada dataset.
     """
     case_ids = get_case_ids(config["root_dir"])
 
@@ -166,6 +202,29 @@ def create_dataloaders(config):
 
 
 # -----------------------------
+# Guardar historial en JSON
+# -----------------------------
+def save_history(history, config):
+    """
+    Guarda l'historial de l'entrenament en format JSON.
+
+    Això ens permet després generar gràfiques sense haver de copiar
+    manualment els valors des de la terminal.
+    """
+    os.makedirs(config["history_dir"], exist_ok=True)
+
+    history_path = os.path.join(
+        config["history_dir"],
+        config["history_name"]
+    )
+
+    with open(history_path, "w") as f:
+        json.dump(history, f, indent=4)
+
+    print(f"\nHistorial guardat a: {history_path}")
+
+
+# -----------------------------
 # Pipeline principal
 # -----------------------------
 def model_pipeline(config):
@@ -175,6 +234,7 @@ def model_pipeline(config):
     print("Device:", device)
 
     os.makedirs(config["models_dir"], exist_ok=True)
+    os.makedirs(config["history_dir"], exist_ok=True)
 
     # Iniciar wandb en mode offline o online segons configuració
     os.environ["WANDB_MODE"] = config["wandb_mode"]
@@ -213,6 +273,9 @@ def model_pipeline(config):
         # -----------------------------
         # Avaluació final en test
         # -----------------------------
+        # Carreguem el millor model guardat segons la mètrica de validació.
+        # Així el test no s'avalua necessàriament amb l'última epoch, sinó
+        # amb el millor checkpoint trobat durant l'entrenament.
         model.load_state_dict(torch.load(save_path, map_location=device))
 
         test_loss, test_dice, test_iou = validate_one_epoch(
@@ -239,6 +302,11 @@ def model_pipeline(config):
             })
         except Exception:
             pass
+
+        # -----------------------------
+        # Guardar historial
+        # -----------------------------
+        save_history(history, config)
 
     return history
 
@@ -274,6 +342,10 @@ if __name__ == "__main__":
         # Guardar models
         "models_dir": "results/models",
         "model_name": "unet_flair_patient_split_20epochs.pth",
+
+        # Guardar historial
+        "history_dir": "results/history",
+        "history_name": "unet_flair_patient_split_20epochs_history.json",
 
         # Wandb
         "wandb_project": "brats2020-tumor-segmentation",
