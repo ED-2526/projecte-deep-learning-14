@@ -263,7 +263,7 @@ if __name__ == "__main__":
         "out_channels": 1,
 
         # Training
-        "epochs": 5,
+        "epochs": 20,
         "batch_size": 8,
         "learning_rate": 1e-4,
         "num_workers": 2,
@@ -273,7 +273,7 @@ if __name__ == "__main__":
 
         # Guardar models
         "models_dir": "results/models",
-        "model_name": "unet_flair_patient_split.pth",
+        "model_name": "unet_flair_patient_split_20epochs.pth",
 
         # Wandb
         "wandb_project": "brats2020-tumor-segmentation",
