@@ -1,0 +1,17 @@
+# sweep para el wandb
+
+program: main.py
+method: bayes
+run_cap: 5
+metric:
+  goal: maximize
+  name: val_dice
+parameters:
+  learning_rate:
+    distribution: uniform
+    min: 0.00005
+    max: 0.0002
+  batch_size:
+    distribution: int_uniform
+    min: 4
+    max: 16

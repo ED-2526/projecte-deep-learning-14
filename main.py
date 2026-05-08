@@ -243,6 +243,7 @@ def model_pipeline(config):
         project=config["wandb_project"],
         config=config
     ):
+        config = dict(wandb.config)  # sweep overrides default config values
         train_loader, val_loader, test_loader = create_dataloaders(config)
 
         model = UNet(
@@ -318,7 +319,7 @@ if __name__ == "__main__":
 
     config = {
         # Dataset
-        "root_dir": "/home/edxnG14/laia/data/data",
+        "root_dir": "/home/edxnG14/cris/data/data",
         "modality": "flair",
         "only_tumor_slices": True,
 
@@ -331,7 +332,7 @@ if __name__ == "__main__":
         "out_channels": 1,
 
         # Training
-        "epochs": 20,
+        "epochs": 25,
         "batch_size": 8,
         "learning_rate": 1e-4,
         "num_workers": 2,
@@ -348,8 +349,8 @@ if __name__ == "__main__":
         "history_name": "unet_flair_patient_split_20epochs_history.json",
 
         # Wandb
-        "wandb_project": "brats2020-tumor-segmentation",
-        "wandb_mode": "offline"
+        "wandb_project": "deep-learning-14",
+        "wandb_mode": "online"
     }
 
     history = model_pipeline(config)
