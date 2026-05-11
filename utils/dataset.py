@@ -16,12 +16,12 @@ import torch
 # Importem Dataset, que és la classe base de PyTorch per crear datasets personalitzats.
 from torch.utils.data import Dataset
 
+from scipy.ndimage import rotate, shift
 
 # Definim el nostre Dataset personalitzat per segmentació binària de tumors.
 # Hereta de torch.utils.data.Dataset perquè PyTorch el pugui utilitzar amb DataLoader.
 class BraTSSegmentationDataset(Dataset):
-
-    def __init__(self, root_dir, case_ids=None, modality="flair", only_tumor_slices=True):
+    def __init__(self, root_dir, case_ids=None, modality="flair", only_tumor_slices=True, augment=False, rotation_degrees=10, shift_pixels=5, intensity_jitter=0.10):
         """
         Dataset per a segmentació binària de tumors amb BraTS2020.
 
@@ -66,6 +66,95 @@ class BraTSSegmentationDataset(Dataset):
         # Construïm l'índex de mostres.
         self._build_index()
 
+        self.augment = augment
+        self.rotation_degrees = rotation_degrees
+        self.shift_pixels = shift_pixels
+        self.intensity_jitter = intensity_jitter
+
+    def _apply_augmentation(self, image, mask):
+        """
+        Aplica data augmentation a una imatge i la seva màscara.
+    
+        Les transformacions geomètriques s'apliquen igual a imatge i màscara.
+        Les transformacions d'intensitat només s'apliquen a la imatge.
+        """
+    
+        # -----------------------------
+        # Flip horitzontal aleatori
+        # -----------------------------
+        if np.random.rand() < 0.5:
+            image = np.flip(image, axis=1)
+            mask = np.flip(mask, axis=1)
+    
+        # -----------------------------
+        # Flip vertical aleatori
+        # -----------------------------
+        if np.random.rand() < 0.5:
+            image = np.flip(image, axis=0)
+            mask = np.flip(mask, axis=0)
+    
+        # -----------------------------
+        # Rotació petita aleatòria
+        # -----------------------------
+        angle = np.random.uniform(
+            -self.rotation_degrees,
+            self.rotation_degrees
+        )
+    
+        image = rotate(
+            image,
+            angle,
+            reshape=False,
+            order=1,
+            mode="nearest"
+        )
+    
+        mask = rotate(
+            mask,
+            angle,
+            reshape=False,
+            order=0,
+            mode="nearest"
+        )
+    
+        # -----------------------------
+        # Petit desplaçament aleatori
+        # -----------------------------
+        shift_y = np.random.uniform(-self.shift_pixels, self.shift_pixels)
+        shift_x = np.random.uniform(-self.shift_pixels, self.shift_pixels)
+    
+        image = shift(
+            image,
+            shift=(shift_y, shift_x),
+            order=1,
+            mode="nearest"
+        )
+    
+        mask = shift(
+            mask,
+            shift=(shift_y, shift_x),
+            order=0,
+            mode="nearest"
+        )
+    
+        # -----------------------------
+        # Canvi suau d'intensitat
+        # Només afecta la imatge, no la màscara
+        # -----------------------------
+        factor = np.random.uniform(
+            1.0 - self.intensity_jitter,
+            1.0 + self.intensity_jitter
+        )
+    
+        image = image * factor
+    
+        # Tornem a limitar la imatge al rang [0, 1]
+        image = np.clip(image, 0.0, 1.0)
+    
+        # Ens assegurem que la màscara continua sent binària
+        mask = (mask > 0.5).astype(np.float32)
+    
+        return image.copy(), mask.copy()
 
     def _build_index(self):
         """
@@ -178,6 +267,10 @@ class BraTSSegmentationDataset(Dataset):
         # Afegim la condició per evitar dividir per zero si la imatge fos constant.
         if image.max() > image.min():
             image = (image - image.min()) / (image.max() - image.min())
+
+        # Apliquem data augmentation només si aquest Dataset ho té activat.
+        if self.augment:
+            image, mask = self._apply_augmentation(image, mask)
 
         # Afegim la dimensió de canal.
         # Abans:
