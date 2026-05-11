@@ -332,7 +332,7 @@ if __name__ == "__main__":
         "out_channels": 1,
 
         # Training
-        "epochs": 15,
+        "epochs": 20,
         "batch_size": 8,
         "learning_rate": 1e-4,
         "num_workers": 2,
