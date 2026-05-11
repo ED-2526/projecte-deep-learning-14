@@ -137,23 +137,26 @@ def create_dataloaders(config):
         root_dir=config["root_dir"],
         case_ids=train_case_ids,
         modality=config["modality"],
-        only_tumor_slices=config["only_tumor_slices"]
+        only_tumor_slices=config["only_tumor_slices"],
+        augment=config["augment_train"]
     )
-
+    
     val_dataset = BraTSSegmentationDataset(
         root_dir=config["root_dir"],
         case_ids=val_case_ids,
         modality=config["modality"],
-        only_tumor_slices=config["only_tumor_slices"]
+        only_tumor_slices=config["only_tumor_slices"],
+        augment=False
     )
 
     test_dataset = BraTSSegmentationDataset(
         root_dir=config["root_dir"],
         case_ids=test_case_ids,
         modality=config["modality"],
-        only_tumor_slices=config["only_tumor_slices"]
+        only_tumor_slices=config["only_tumor_slices"],
+        augment=False
     )
-
+    
     train_loader = DataLoader(
         train_dataset,
         batch_size=config["batch_size"],
@@ -322,6 +325,7 @@ if __name__ == "__main__":
         "root_dir": "/home/edxnG14/cris/data/data",
         "modality": "flair",
         "only_tumor_slices": True,
+        "augment_train": True,
 
         # Splits
         "train_split": 0.8,
@@ -342,11 +346,11 @@ if __name__ == "__main__":
 
         # Guardar models
         "models_dir": "results/models",
-        "model_name": "unet_flair_patient_split_20epochs.pth",
+        "model_name": "unet_flair_patient_split_20epochs_aug.pth",
 
         # Guardar historial
         "history_dir": "results/history",
-        "history_name": "unet_flair_patient_split_20epochs_history.json",
+        "history_name": "unet_flair_patient_split_20epochs_aug_history.json",
 
         # Wandb
         "wandb_project": "deep-learning-14",
