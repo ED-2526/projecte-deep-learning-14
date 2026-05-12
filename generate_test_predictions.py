@@ -17,7 +17,7 @@ from models.unet import UNet
 CONFIG = {
     "root_dir": "/home/edxnG14/laia/data/data",
     "modality": "flair",
-    "only_tumor_slices": True,
+    "only_tumor_slices": False,
 
     "train_split": 0.8,
     "val_split": 0.1,
