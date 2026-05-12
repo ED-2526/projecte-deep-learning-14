@@ -29,7 +29,7 @@ CONFIG = {
     "batch_size": 1,
     "num_workers": 2,
 
-    "model_path": "results/models/unet_multimodal_patient_split_20epochs_all_slices.pth"
+    "model_path": "results/models/unet_multimodal_patient_split_20epochs_all_slices.pth",
     "predictions_dir": "results/predictions",
     "num_examples": 12,
     "threshold": 0.5
