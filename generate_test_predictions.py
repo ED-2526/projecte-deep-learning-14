@@ -89,7 +89,7 @@ def create_test_dataset(config):
     test_dataset = BraTSSegmentationDataset(
         root_dir=config["root_dir"],
         case_ids=test_case_ids,
-        modalities = ["flair", "t1", "t1ce", "t2"],
+        modalities=config["modalities"],
         only_tumor_slices=config["only_tumor_slices"]
     )
 
@@ -135,11 +135,13 @@ def main():
             logits = model(images)
             probs = torch.sigmoid(logits)
             preds = (probs > CONFIG["threshold"]).float()
-
-            image_np = images[0].cpu().numpy()
-            mask_np = masks[0].cpu().numpy()
-            pred_np = preds[0].cpu().numpy()
-
+            
+            modality_idx = CONFIG["modalities"].index("flair")
+            
+            image_np = images[0, modality_idx].cpu().numpy()
+            mask_np = masks[0, 0].cpu().numpy()
+            pred_np = preds[0, 0].cpu().numpy()
+            
             save_path = os.path.join(
                 CONFIG["predictions_dir"],
                 f"test_prediction_{saved + 1:02d}.png"
