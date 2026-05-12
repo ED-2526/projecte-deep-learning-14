@@ -136,7 +136,7 @@ def create_dataloaders(config):
     train_dataset = BraTSSegmentationDataset(
         root_dir=config["root_dir"],
         case_ids=train_case_ids,
-        modalities=config["modalities"]
+        modalities=config["modalities"],
         only_tumor_slices=config["only_tumor_slices"],
         augment=config["augment_train"]
     )
@@ -144,7 +144,7 @@ def create_dataloaders(config):
     val_dataset = BraTSSegmentationDataset(
         root_dir=config["root_dir"],
         case_ids=val_case_ids,
-        modalities=config["modalities"]
+        modalities=config["modalities"],
         only_tumor_slices=config["only_tumor_slices"],
         augment=False
     )
@@ -152,7 +152,7 @@ def create_dataloaders(config):
     test_dataset = BraTSSegmentationDataset(
         root_dir=config["root_dir"],
         case_ids=test_case_ids,
-        modalities=config["modalities"]
+        modalities=config["modalities"],
         only_tumor_slices=config["only_tumor_slices"],
         augment=False
     )
