@@ -21,23 +21,26 @@ from scipy.ndimage import rotate, shift
 # Definim el nostre Dataset personalitzat per segmentació binària de tumors.
 # Hereta de torch.utils.data.Dataset perquè PyTorch el pugui utilitzar amb DataLoader.
 class BraTSSegmentationDataset(Dataset):
-    def __init__(self, root_dir, case_ids=None, modality="flair", only_tumor_slices=True, augment=False, rotation_degrees=10, shift_pixels=5, intensity_jitter=0.10):
+    def __init__(self,root_dir,case_ids=None,modalities=None,only_tumor_slices=True,augment=False,rotation_degrees=10,shift_pixels=5,intensity_jitter=0.10):
         """
         Dataset per a segmentació binària de tumors amb BraTS2020.
 
         Args:
             root_dir: ruta a la carpeta Training, que conté les carpetes dels pacients.
             case_ids: llista opcional de pacients. Si és None, agafa tots els casos.
-            modality: modalitat MRI a utilitzar. Per ara, fem servir "flair".
+            modality: modalitat MRI a utilitzar. Per ara, fem servir totes.
             only_tumor_slices: si True, només usa slices on hi ha tumor.
         """
 
         # Guardem la ruta principal del dataset.
         self.root_dir = root_dir
 
-        # Guardem la modalitat que volem utilitzar com a entrada.
-        # En el baseline fem servir FLAIR.
-        self.modality = modality
+        # Guardem les modalitats MRI que volem utilitzar com a canals d'entrada.
+        # Si no se n'indica cap, fem servir les quatre modalitats de BraTS.
+        if modalities is None:
+            modalities = ["flair", "t1", "t1ce", "t2"]
+        
+        self.modalities = modalities
 
         # Guardem si volem només slices amb tumor o totes les slices.
         self.only_tumor_slices = only_tumor_slices
@@ -73,24 +76,27 @@ class BraTSSegmentationDataset(Dataset):
 
     def _apply_augmentation(self, image, mask):
         """
-        Aplica data augmentation a una imatge i la seva màscara.
+        Aplica data augmentation a una imatge multicanal i la seva màscara.
     
-        Les transformacions geomètriques s'apliquen igual a imatge i màscara.
-        Les transformacions d'intensitat només s'apliquen a la imatge.
+        image té forma [C, H, W]
+        mask té forma [H, W]
+    
+        Les transformacions geomètriques s'apliquen igual a tots els canals i a la màscara.
+        Les transformacions d'intensitat només s'apliquen als canals de la imatge.
         """
     
         # -----------------------------
         # Flip horitzontal aleatori
         # -----------------------------
         if np.random.rand() < 0.5:
-            image = np.flip(image, axis=1)
+            image = np.flip(image, axis=2)
             mask = np.flip(mask, axis=1)
     
         # -----------------------------
         # Flip vertical aleatori
         # -----------------------------
         if np.random.rand() < 0.5:
-            image = np.flip(image, axis=0)
+            image = np.flip(image, axis=1)
             mask = np.flip(mask, axis=0)
     
         # -----------------------------
@@ -101,13 +107,19 @@ class BraTSSegmentationDataset(Dataset):
             self.rotation_degrees
         )
     
-        image = rotate(
-            image,
-            angle,
-            reshape=False,
-            order=1,
-            mode="nearest"
-        )
+        rotated_channels = []
+    
+        for c in range(image.shape[0]):
+            rotated_channel = rotate(
+                image[c],
+                angle,
+                reshape=False,
+                order=1,
+                mode="nearest"
+            )
+            rotated_channels.append(rotated_channel)
+    
+        image = np.stack(rotated_channels, axis=0)
     
         mask = rotate(
             mask,
@@ -123,12 +135,18 @@ class BraTSSegmentationDataset(Dataset):
         shift_y = np.random.uniform(-self.shift_pixels, self.shift_pixels)
         shift_x = np.random.uniform(-self.shift_pixels, self.shift_pixels)
     
-        image = shift(
-            image,
-            shift=(shift_y, shift_x),
-            order=1,
-            mode="nearest"
-        )
+        shifted_channels = []
+    
+        for c in range(image.shape[0]):
+            shifted_channel = shift(
+                image[c],
+                shift=(shift_y, shift_x),
+                order=1,
+                mode="nearest"
+            )
+            shifted_channels.append(shifted_channel)
+    
+        image = np.stack(shifted_channels, axis=0)
     
         mask = shift(
             mask,
@@ -147,8 +165,6 @@ class BraTSSegmentationDataset(Dataset):
         )
     
         image = image * factor
-    
-        # Tornem a limitar la imatge al rang [0, 1]
         image = np.clip(image, 0.0, 1.0)
     
         # Ens assegurem que la màscara continua sent binària
@@ -233,21 +249,37 @@ class BraTSSegmentationDataset(Dataset):
         # Construïm la ruta a la carpeta del pacient.
         case_path = os.path.join(self.root_dir, case_id)
 
-        # Construïm la ruta a la imatge MRI d'entrada.
-        # Com self.modality és "flair", carregarà el fitxer *_flair.nii.
-        image_path = os.path.join(case_path, f"{case_id}_{self.modality}.nii")
-
         # Construïm la ruta a la màscara real de segmentació.
         seg_path = os.path.join(case_path, f"{case_id}_seg.nii")
-
-        # Carreguem el volum complet de la imatge MRI.
-        image_volume = nib.load(image_path).get_fdata()
-
+        
         # Carreguem el volum complet de la màscara.
         seg_volume = nib.load(seg_path).get_fdata()
-
-        # Extraiem la slice 2D de la imatge.
-        image = image_volume[:, :, slice_idx]
+        
+        # Carreguem totes les modalitats MRI i les apilem com a canals.
+        image_channels = []
+        
+        for modality in self.modalities:
+            image_path = os.path.join(case_path, f"{case_id}_{modality}.nii")
+        
+            image_volume = nib.load(image_path).get_fdata()
+        
+            # Extraiem la slice 2D d'aquesta modalitat.
+            image_slice = image_volume[:, :, slice_idx]
+        
+            # Convertim a float32.
+            image_slice = image_slice.astype(np.float32)
+        
+            # Normalitzem cada modalitat per separat entre 0 i 1.
+            if image_slice.max() > image_slice.min():
+                image_slice = (image_slice - image_slice.min()) / (
+                    image_slice.max() - image_slice.min()
+                )
+        
+            image_channels.append(image_slice)
+        
+        # Convertim la llista de modalitats en un array multicanal.
+        # Forma final: [C, H, W], on C = nombre de modalitats.
+        image = np.stack(image_channels, axis=0)
 
         # Extraiem la slice 2D corresponent de la màscara.
         mask = seg_volume[:, :, slice_idx]
@@ -259,28 +291,12 @@ class BraTSSegmentationDataset(Dataset):
         #   1, 2, 4 -> 1
         mask = (mask > 0).astype(np.float32)
 
-        # Convertim la imatge a float32.
-        # Això és necessari perquè PyTorch treballa amb tensors decimals.
-        image = image.astype(np.float32)
-
-        # Normalitzem la imatge entre 0 i 1.
-        # Afegim la condició per evitar dividir per zero si la imatge fos constant.
-        if image.max() > image.min():
-            image = (image - image.min()) / (image.max() - image.min())
-
         # Apliquem data augmentation només si aquest Dataset ho té activat.
         if self.augment:
             image, mask = self._apply_augmentation(image, mask)
 
-        # Afegim la dimensió de canal.
-        # Abans:
-        #   image -> [H, W]
-        #   mask  -> [H, W]
-        #
-        # Després:
-        #   image -> [1, H, W]
-        #   mask  -> [1, H, W]
-        image = np.expand_dims(image, axis=0)
+        # La imatge ja té forma [C, H, W], per tant no cal afegir canal.
+        # La màscara sí que necessita canal: [H, W] -> [1, H, W]
         mask = np.expand_dims(mask, axis=0)
 
         # Convertim la imatge de NumPy a tensor de PyTorch.
