@@ -141,6 +141,10 @@ def main():
             image_np = images[0, modality_idx].cpu().numpy()
             mask_np = masks[0, 0].cpu().numpy()
             pred_np = preds[0, 0].cpu().numpy()
+
+            # Evitem guardar slices completament buides
+            if mask_np.sum() == 0:
+                continue
             
             save_path = os.path.join(
                 CONFIG["predictions_dir"],
