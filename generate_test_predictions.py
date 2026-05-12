@@ -29,7 +29,7 @@ CONFIG = {
     "batch_size": 1,
     "num_workers": 2,
 
-    "model_path": "results/models/unet_flair_patient_split_20epochs.pth",
+    "model_path": "results/models/unet_flair_patient_split_20epochs_all_slices_history.pth",
     "predictions_dir": "results/predictions",
     "num_examples": 12,
     "threshold": 0.5
