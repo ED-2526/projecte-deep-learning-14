@@ -30,7 +30,7 @@ CONFIG = {
     "num_workers": 2,
 
     "model_path": "results/models/unet_multimodal_patient_split_20epochs_all_slices.pth",
-    "predictions_dir": "results/predictions",
+    "predictions_dir": "results/predictions_multimodal",
     "num_examples": 12,
     "threshold": 0.5
 }
