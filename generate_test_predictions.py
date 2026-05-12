@@ -16,20 +16,20 @@ from models.unet import UNet
 # -----------------------------
 CONFIG = {
     "root_dir": "/home/edxnG14/laia/data/data",
-    "modality": "flair",
+    "modalities": ["flair", "t1", "t1ce", "t2"],
     "only_tumor_slices": False,
 
     "train_split": 0.8,
     "val_split": 0.1,
     "seed": 42,
 
-    "in_channels": 1,
+    "in_channels": 4,
     "out_channels": 1,
 
     "batch_size": 1,
     "num_workers": 2,
 
-    "model_path": "results/models/unet_flair_patient_split_20epochs_all_slices.pth",
+    "model_path": "results/models/unet_multimodal_patient_split_20epochs_all_slices.pth"
     "predictions_dir": "results/predictions",
     "num_examples": 12,
     "threshold": 0.5
@@ -89,7 +89,7 @@ def create_test_dataset(config):
     test_dataset = BraTSSegmentationDataset(
         root_dir=config["root_dir"],
         case_ids=test_case_ids,
-        modality=config["modality"],
+        modalities = ["flair", "t1", "t1ce", "t2"],
         only_tumor_slices=config["only_tumor_slices"]
     )
 
