@@ -5,7 +5,7 @@ from utils.visualization import plot_metric
 
 
 def main():
-    history_path = "results/history/unet_flair_patient_split_20epochs_all_slices_history.json"
+    history_path = "results/history/unet_multimodal_patient_split_20epochs_all_slices_history.json"
     figures_dir = "results/figures"
 
     os.makedirs(figures_dir, exist_ok=True)
