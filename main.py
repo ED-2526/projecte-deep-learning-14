@@ -323,16 +323,16 @@ if __name__ == "__main__":
     config = {
         # Dataset
         "root_dir": "/home/edxnG14/cris/data/data",
-        "modality": "flair",
+        "modalities": ["flair", "t1", "t1ce", "t2"],
         "only_tumor_slices": False,
-        "augment_train": False,
-        
+        "augment_train": False,        
+
         # Splits
         "train_split": 0.8,
         "val_split": 0.1,
 
         # Model
-        "in_channels": 1,
+        "in_channels": 4,
         "out_channels": 1,
 
         # Training
@@ -346,11 +346,11 @@ if __name__ == "__main__":
 
         # Guardar models
         "models_dir": "results/models",
-        "model_name": "unet_flair_patient_split_20epochs_all_slices.pth",
-
+        "model_name": "unet_multimodal_patient_split_20epochs_all_slices.pth",
+        
         # Guardar historial
         "history_dir": "results/history",
-        "history_name": "unet_flair_patient_split_20epochs_all_slices_history.json",
+        "history_name": "unet_multimodal_patient_split_20epochs_all_slices_history.json",
 
         # Wandb
         "wandb_project": "deep-learning-14",
