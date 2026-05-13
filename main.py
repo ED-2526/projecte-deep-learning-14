@@ -322,7 +322,7 @@ if __name__ == "__main__":
 
     config = {
         # Dataset
-        "root_dir": "/home/edxnG14/cris/data/data",
+        "root_dir": "/home/edxnG14/laia/data/MICCAI_BraTS2020_TrainingData",
         "modalities": ["flair", "t1", "t1ce", "t2"],
         "only_tumor_slices": False,
         "augment_train": False,        
