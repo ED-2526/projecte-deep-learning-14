@@ -346,11 +346,11 @@ if __name__ == "__main__":
 
         # Guardar models
         "models_dir": "results/models",
-        "model_name": "unet_multimodal_patient_split_20epochs_all_slices.pth",
+        "model_name": "unet_multimodal_all_patients_25epochs_weighted_sampling.pth",
         
         # Guardar historial
         "history_dir": "results/history",
-        "history_name": "unet_multimodal_patient_split_20epochs_all_slices_history.json",
+        "history_name": "unet_multimodal_all_patients_25epochs_weighted_sampling_history.json",
 
         # Wandb
         "wandb_project": "deep-learning-14",
