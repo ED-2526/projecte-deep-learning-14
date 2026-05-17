@@ -14,7 +14,7 @@ from models.unet import UNet
 CONFIG = {
     "root_dir": os.environ.get(
         "DATA_ROOT",
-        "/home/edxnG14/laia/data/data"
+        "/home/edxnG14/laia/data/MICCAI_BraTS2020_TrainingData"
     ),
 
     # IMPORTANT: model multimodal
@@ -33,7 +33,7 @@ CONFIG = {
     "num_workers": 2,
 
     # Canvia aquest path pel nom exacte del teu model guardat
-    "model_path": "results/models/unet_multimodal_patient_split_25epochs_all_slices_all_patients.pth",
+    "model_path": "results/models/unet_multimodal_patient_split_20epochs_all_slices.pth",
 }
 
 
