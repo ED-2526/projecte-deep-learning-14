@@ -2,11 +2,10 @@ import os
 import json
 import random
 import numpy as np
-import nibabel as nib
 import torch
 import wandb
 
-from torch.utils.data import DataLoader, WeightedRandomSampler
+from torch.utils.data import DataLoader
 
 from utils.dataset import BraTSSegmentationDataset
 from utils.losses import BCEDiceLoss
@@ -107,77 +106,6 @@ def split_case_ids(case_ids, train_split, val_split, seed):
 
     return train_case_ids, val_case_ids, test_case_ids
 
-def get_sample_weight(root_dir, case_id, slice_idx):
-    """
-    Calcula el pes d'una slice segons la mida del tumor.
-
-    La idea és donar més pes a tumors petits perquè el DataLoader
-    els mostri més sovint durant l'entrenament.
-    """
-
-    seg_path = os.path.join(
-        root_dir,
-        case_id,
-        f"{case_id}_seg.nii"
-    )
-
-    seg = nib.load(seg_path).get_fdata()
-    mask_slice = seg[:, :, slice_idx]
-
-    tumor_pixels = np.sum(mask_slice > 0)
-
-    if tumor_pixels == 0:
-        return 0.5          # slice sense tumor
-    elif tumor_pixels <= 10:
-        return 10.0         # tumor molt petit
-    elif tumor_pixels <= 100:
-        return 8.0          # tumor petit
-    elif tumor_pixels <= 500:
-        return 4.0          # tumor mitjà-petit
-    elif tumor_pixels <= 1000:
-        return 2.0          # tumor mitjà
-    else:
-        return 1.0          # tumor gran
-
-def create_weighted_sampler(dataset, root_dir):
-    """
-    Crea un WeightedRandomSampler per al train_dataset.
-
-    Utilitza dataset.samples, que hauria de contenir tuples del tipus:
-    (case_id, slice_idx)
-
-    Si al teu Dataset la llista té un altre nom, caldrà ajustar aquesta part.
-    """
-
-    weights = []
-
-    print("\nCalculant pesos per WeightedRandomSampler...")
-
-    for sample in dataset.samples:
-        case_id, slice_idx = sample
-
-        weight = get_sample_weight(
-            root_dir=root_dir,
-            case_id=case_id,
-            slice_idx=slice_idx
-        )
-
-        weights.append(weight)
-
-    weights = torch.DoubleTensor(weights)
-
-    sampler = WeightedRandomSampler(
-        weights=weights,
-        num_samples=len(weights),
-        replacement=True
-    )
-
-    print("WeightedRandomSampler creat.")
-    print(f"Nombre de mostres ponderades: {len(weights)}")
-    print(f"Pes mínim: {weights.min().item():.2f}")
-    print(f"Pes màxim: {weights.max().item():.2f}")
-
-    return sampler
 
 # -----------------------------
 # Crear datasets i dataloaders
@@ -229,26 +157,12 @@ def create_dataloaders(config):
         augment=False
     )
     
-    if config.get("use_weighted_sampler", False):
-        train_sampler = create_weighted_sampler(
-            dataset=train_dataset,
-            root_dir=config["root_dir"]
-        )
-    
-        train_loader = DataLoader(
-            train_dataset,
-            batch_size=config["batch_size"],
-            sampler=train_sampler,
-            shuffle=False,
-            num_workers=config["num_workers"]
-        )
-    else:
-        train_loader = DataLoader(
-            train_dataset,
-            batch_size=config["batch_size"],
-            shuffle=True,
-            num_workers=config["num_workers"]
-        )
+    train_loader = DataLoader(
+        train_dataset,
+        batch_size=config["batch_size"],
+        shuffle=True,
+        num_workers=config["num_workers"]
+    )
 
     val_loader = DataLoader(
         val_dataset,
@@ -432,17 +346,15 @@ if __name__ == "__main__":
 
         # Guardar models
         "models_dir": "results/models",
-        "model_name": "unet_multimodal_all_patients_25epochs_weighted_sampling.pth",
+        "model_name": "unet_multimodal_patient_split_20epochs_all_slices.pth",
         
         # Guardar historial
         "history_dir": "results/history",
-        "history_name": "unet_multimodal_all_patients_25epochs_weighted_sampling_history.json",
+        "history_name": "unet_multimodal_patient_split_20epochs_all_slices_history.json",
 
         # Wandb
         "wandb_project": "deep-learning-14",
-        "wandb_mode": "online",
-
-        "use_weighted_sampler": True
+        "wandb_mode": "online"
     }
 
     history = model_pipeline(config)
