@@ -8,7 +8,7 @@ import wandb
 from torch.utils.data import DataLoader
 
 from utils.dataset import BraTSSegmentationDataset
-from utils.losses import BCEDiceLoss
+from utils.losses import BCEDiceLoss, BCETverskyLoss
 from models.unet import UNet
 from train import train, validate_one_epoch
 
@@ -254,7 +254,12 @@ def model_pipeline(config):
             out_channels=config["out_channels"]
         ).to(device)
 
-        criterion = BCEDiceLoss()
+        criterion = BCETverskyLoss(
+            alpha=0.3,
+            beta=0.7,
+            bce_weight=0.5,
+            tversky_weight=0.5
+        )
 
         optimizer = torch.optim.Adam(
             model.parameters(),
@@ -346,12 +351,12 @@ if __name__ == "__main__":
 
         # Guardar models
         "models_dir": "results/models",
-        "model_name": "unet_multimodal_patient_split_20epochs_all_slices.pth",
+        "model_name": "unet_multimodal_20epochs_bce_tversky.pth",
         
         # Guardar historial
         "history_dir": "results/history",
-        "history_name": "unet_multimodal_patient_split_20epochs_all_slices_history.json",
-
+        "history_name": "unet_multimodal_20epochs_bce_tversky_history.json",
+        
         # Wandb
         "wandb_project": "deep-learning-14",
         "wandb_mode": "online"
