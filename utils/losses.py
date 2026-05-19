@@ -130,3 +130,84 @@ class BCEDiceLoss(nn.Module):
         # Per defecte:
         #   0.5 * BCE + 0.5 * DiceLoss
         return self.bce_weight * bce_loss + self.dice_weight * dice_loss
+
+class TverskyLoss(nn.Module):
+    """
+    Tversky Loss per segmentació binària.
+
+    És semblant a Dice Loss, però permet donar diferent pes a:
+        - falsos positius
+        - falsos negatius
+
+    En el nostre cas ens interessen especialment els falsos negatius,
+    perquè el model falla sobretot quan hi ha tumor petit però prediu 0 píxels.
+
+    alpha controla el pes dels falsos positius.
+    beta controla el pes dels falsos negatius.
+
+    Si beta > alpha, penalitzem més deixar escapar tumor.
+    """
+
+    def __init__(self, alpha=0.3, beta=0.7, smooth=1e-6):
+        super(TverskyLoss, self).__init__()
+        self.alpha = alpha
+        self.beta = beta
+        self.smooth = smooth
+
+    def forward(self, logits, targets):
+        """
+        logits: sortida crua del model, abans de sigmoid
+        targets: màscara real binària, amb valors 0 o 1
+        """
+
+        probs = torch.sigmoid(logits)
+
+        probs = probs.view(-1)
+        targets = targets.view(-1)
+
+        true_positive = (probs * targets).sum()
+        false_positive = (probs * (1 - targets)).sum()
+        false_negative = ((1 - probs) * targets).sum()
+
+        tversky_index = (
+            (true_positive + self.smooth)
+            / (
+                true_positive
+                + self.alpha * false_positive
+                + self.beta * false_negative
+                + self.smooth
+            )
+        )
+
+        return 1 - tversky_index
+
+
+class BCETverskyLoss(nn.Module):
+    """
+    Combina BCEWithLogitsLoss + TverskyLoss.
+
+    BCE ajuda a aprendre píxel a píxel.
+    Tversky ajuda a millorar el solapament i penalitza més els falsos negatius.
+
+    Aquesta combinació és útil quan el model infra-segmenta o deixa escapar tumors petits.
+    """
+
+    def __init__(self, alpha=0.3, beta=0.7, bce_weight=0.5, tversky_weight=0.5):
+        super(BCETverskyLoss, self).__init__()
+
+        self.bce = nn.BCEWithLogitsLoss()
+        self.tversky = TverskyLoss(alpha=alpha, beta=beta)
+
+        self.bce_weight = bce_weight
+        self.tversky_weight = tversky_weight
+
+    def forward(self, logits, targets):
+        bce_loss = self.bce(logits, targets)
+        tversky_loss = self.tversky(logits, targets)
+
+        loss = (
+            self.bce_weight * bce_loss
+            + self.tversky_weight * tversky_loss
+        )
+
+        return loss
