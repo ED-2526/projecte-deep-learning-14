@@ -1,161 +1,197 @@
-# Importem PyTorch perquè les prediccions i les màscares són tensors.
 import torch
 
 
 def binarize_predictions(logits, threshold=0.5):
-    """
-    Converteix els logits del model en una màscara binària.
-
-    Args:
-        logits: sortida bruta del model, abans de sigmoid.
-        threshold: llindar per decidir si un píxel és tumor o no.
-
-    Returns:
-        preds: màscara binària amb valors 0 o 1.
-    """
-
-    # La U-Net retorna logits, no probabilitats.
-    # Apliquem sigmoid per convertir cada logit en una probabilitat entre 0 i 1.
     probs = torch.sigmoid(logits)
+    return (probs > threshold).float()
 
-    # Convertim les probabilitats en valors binaris.
-    # Si la probabilitat és superior a 0.5, considerem que és tumor.
-    # Si és inferior o igual a 0.5, considerem que és fons.
-    preds = (probs > threshold).float()
 
-    # Retornem la màscara binària.
-    return preds
+def multiclass_predictions(logits):
+    return torch.argmax(logits, dim=1)
+
+
+def _prepare_multiclass_targets(targets):
+    if targets.ndim == 4 and targets.shape[1] == 1:
+        targets = targets[:, 0]
+    return targets.long()
+
+
+def multiclass_dice_score(
+    logits,
+    targets,
+    num_classes=None,
+    include_background=False,
+    smooth=1e-6,
+):
+    """
+    Dice mitjà per segmentació multiclasse.
+
+    Calcula un Dice per classe i en fa la mitjana. Per defecte no inclou la
+    classe 0 perquè és el fons. Les classes absents tant a predicció com a target
+    s'ignoren per no inflar artificialment la mitjana.
+    """
+    if num_classes is None:
+        num_classes = logits.shape[1]
+
+    preds = multiclass_predictions(logits)
+    targets = _prepare_multiclass_targets(targets)
+
+    start_class = 0 if include_background else 1
+    scores = []
+
+    for class_idx in range(start_class, num_classes):
+        pred_c = (preds == class_idx).float()
+        target_c = (targets == class_idx).float()
+
+        pred_sum = pred_c.sum()
+        target_sum = target_c.sum()
+
+        if pred_sum == 0 and target_sum == 0:
+            continue
+
+        intersection = (pred_c * target_c).sum()
+        dice = (2.0 * intersection + smooth) / (pred_sum + target_sum + smooth)
+        scores.append(dice)
+
+    if len(scores) == 0:
+        return 1.0
+
+    return torch.stack(scores).mean().item()
+
+
+def multiclass_iou_score(
+    logits,
+    targets,
+    num_classes=None,
+    include_background=False,
+    smooth=1e-6,
+):
+    """IoU mitjana per segmentació multiclasse."""
+    if num_classes is None:
+        num_classes = logits.shape[1]
+
+    preds = multiclass_predictions(logits)
+    targets = _prepare_multiclass_targets(targets)
+
+    start_class = 0 if include_background else 1
+    scores = []
+
+    for class_idx in range(start_class, num_classes):
+        pred_c = (preds == class_idx).float()
+        target_c = (targets == class_idx).float()
+
+        pred_sum = pred_c.sum()
+        target_sum = target_c.sum()
+
+        if pred_sum == 0 and target_sum == 0:
+            continue
+
+        intersection = (pred_c * target_c).sum()
+        union = pred_sum + target_sum - intersection
+        iou = (intersection + smooth) / (union + smooth)
+        scores.append(iou)
+
+    if len(scores) == 0:
+        return 1.0
+
+    return torch.stack(scores).mean().item()
+
+
+def per_class_dice_iou(logits, targets, num_classes=None, smooth=1e-6):
+    """
+    Retorna mètriques per classe en un diccionari.
+
+    Útil per veure si el model segmenta millor edema, necrosi o tumor realçat.
+    """
+    if num_classes is None:
+        num_classes = logits.shape[1]
+
+    preds = multiclass_predictions(logits)
+    targets = _prepare_multiclass_targets(targets)
+
+    results = {}
+    for class_idx in range(num_classes):
+        pred_c = (preds == class_idx).float()
+        target_c = (targets == class_idx).float()
+
+        intersection = (pred_c * target_c).sum()
+        pred_sum = pred_c.sum()
+        target_sum = target_c.sum()
+        union = pred_sum + target_sum - intersection
+
+        dice = (2.0 * intersection + smooth) / (pred_sum + target_sum + smooth)
+        iou = (intersection + smooth) / (union + smooth)
+
+        results[class_idx] = {
+            "dice": dice.item(),
+            "iou": iou.item(),
+            "target_pixels": int(target_sum.item()),
+            "pred_pixels": int(pred_sum.item()),
+        }
+
+    return results
 
 
 def dice_score(logits, targets, threshold=0.5, smooth=1e-6):
     """
-    Calcula el Dice Score.
+    Dice Score automàtic.
 
-    Dice mesura el solapament entre la màscara predita i la màscara real.
-    Valor entre 0 i 1:
-        1 = segmentació perfecta
-        0 = cap solapament
+    Si logits té 1 canal, calcula Dice binari.
+    Si logits té més d'1 canal, calcula Dice multiclasse mitjà sense fons.
     """
+    if logits.shape[1] > 1:
+        return multiclass_dice_score(logits, targets, smooth=smooth)
 
-    # Convertim els logits en una màscara binària.
     preds = binarize_predictions(logits, threshold)
-
-    # Aplanem la predicció.
-    # Passem de [batch, 1, H, W] a un vector llarg.
     preds = preds.view(-1)
+    targets = targets.view(-1).float()
 
-    # Aplanem també la màscara real.
-    targets = targets.view(-1)
-
-    # Calculem la intersecció.
-    # Com preds i targets són 0 o 1, el producte només és 1 quan tots dos són tumor.
     intersection = (preds * targets).sum()
-
-    # Fórmula del Dice:
-    # Dice = (2 * intersecció) / (píxels predits + píxels reals)
-    # Afegim smooth per evitar divisions per zero.
     dice = (2.0 * intersection + smooth) / (
         preds.sum() + targets.sum() + smooth
     )
-
-    # Retornem el valor com a número Python.
     return dice.item()
 
 
 def iou_score(logits, targets, threshold=0.5, smooth=1e-6):
     """
-    Calcula la IoU, també anomenada Jaccard Index.
+    IoU automàtica.
 
-    IoU = intersecció / unió
-
-    Valor entre 0 i 1:
-        1 = segmentació perfecta
-        0 = cap solapament
+    Si logits té 1 canal, calcula IoU binària.
+    Si logits té més d'1 canal, calcula IoU multiclasse mitjana sense fons.
     """
+    if logits.shape[1] > 1:
+        return multiclass_iou_score(logits, targets, smooth=smooth)
 
-    # Convertim logits a màscara binària.
     preds = binarize_predictions(logits, threshold)
-
-    # Aplanem predicció i màscara real.
     preds = preds.view(-1)
-    targets = targets.view(-1)
+    targets = targets.view(-1).float()
 
-    # Intersecció: píxels que són tumor tant a la predicció com a la màscara real.
     intersection = (preds * targets).sum()
-
-    # Unió:
-    # píxels predits com tumor + píxels reals de tumor - intersecció.
-    # Restem la intersecció perquè si no la comptaríem dues vegades.
     union = preds.sum() + targets.sum() - intersection
-
-    # Fórmula de la IoU.
     iou = (intersection + smooth) / (union + smooth)
-
-    # Retornem el valor com a número Python.
     return iou.item()
 
 
 def precision_score(logits, targets, threshold=0.5, smooth=1e-6):
-    """
-    Calcula la Precision.
-
-    Precision respon:
-        De tots els píxels que el model ha predit com a tumor,
-        quants realment eren tumor?
-
-    Precision = TP / (TP + FP)
-    """
-
-    # Convertim logits a màscara binària.
+    """Precision binària. Per multiclasse, usar per_class_dice_iou o afegir mètriques macro."""
     preds = binarize_predictions(logits, threshold)
-
-    # Aplanem tensors.
     preds = preds.view(-1)
-    targets = targets.view(-1)
+    targets = targets.view(-1).float()
 
-    # True positives:
-    # píxels que el model prediu com tumor i que realment són tumor.
     tp = (preds * targets).sum()
-
-    # False positives:
-    # píxels que el model prediu com tumor però que realment són fons.
     fp = (preds * (1 - targets)).sum()
-
-    # Fórmula de la precision.
     precision = (tp + smooth) / (tp + fp + smooth)
-
-    # Retornem el valor.
     return precision.item()
 
 
 def recall_score(logits, targets, threshold=0.5, smooth=1e-6):
-    """
-    Calcula el Recall.
-
-    Recall respon:
-        De tots els píxels que realment són tumor,
-        quants ha detectat el model?
-
-    Recall = TP / (TP + FN)
-    """
-
-    # Convertim logits a màscara binària.
+    """Recall binari. Per multiclasse, usar per_class_dice_iou o afegir mètriques macro."""
     preds = binarize_predictions(logits, threshold)
-
-    # Aplanem tensors.
     preds = preds.view(-1)
-    targets = targets.view(-1)
+    targets = targets.view(-1).float()
 
-    # True positives:
-    # píxels correctament detectats com a tumor.
     tp = (preds * targets).sum()
-
-    # False negatives:
-    # píxels que realment són tumor però el model ha predit com a fons.
     fn = ((1 - preds) * targets).sum()
-
-    # Fórmula del recall.
     recall = (tp + smooth) / (tp + fn + smooth)
-
-    # Retornem el valor.
     return recall.item()
