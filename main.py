@@ -8,7 +8,7 @@ import wandb
 from torch.utils.data import DataLoader
 
 from utils.dataset import BraTSSegmentationDataset
-from utils.losses import BCEDiceLoss, BCETverskyLoss
+from utils.losses import BCEDiceLoss, BCETverskyLoss, CEDiceLoss
 from models.unet import UNet
 from train import train, validate_one_epoch
 
@@ -138,7 +138,8 @@ def create_dataloaders(config):
         case_ids=train_case_ids,
         modalities=config["modalities"],
         only_tumor_slices=config["only_tumor_slices"],
-        augment=config["augment_train"]
+        augment=config["augment_train"],
+        segmentation_type=config["segmentation_type"]
     )
     
     val_dataset = BraTSSegmentationDataset(
@@ -146,7 +147,8 @@ def create_dataloaders(config):
         case_ids=val_case_ids,
         modalities=config["modalities"],
         only_tumor_slices=config["only_tumor_slices"],
-        augment=False
+        augment=False,
+        segmentation_type=config["segmentation_type"]
     )
 
     test_dataset = BraTSSegmentationDataset(
@@ -154,7 +156,8 @@ def create_dataloaders(config):
         case_ids=test_case_ids,
         modalities=config["modalities"],
         only_tumor_slices=config["only_tumor_slices"],
-        augment=False
+        augment=False,
+        segmentation_type=config["segmentation_type"]
     )
     
     train_loader = DataLoader(
@@ -254,12 +257,23 @@ def model_pipeline(config):
             out_channels=config["out_channels"]
         ).to(device)
 
-        criterion = BCETverskyLoss(
-            alpha=0.3,
-            beta=0.7,
-            bce_weight=0.5,
-            tversky_weight=0.5
-        )
+        if config["segmentation_type"] == "multiclass":
+            # Sortida multiclasse: logits [B, 4, H, W] i target [B, H, W].
+            # CrossEntropy aprèn la classe píxel a píxel i Dice millora el solapament.
+            criterion = CEDiceLoss(
+                num_classes=config["out_channels"],
+                ce_weight=config.get("ce_weight", 0.5),
+                dice_weight=config.get("dice_weight", 0.5),
+                include_background=config.get("include_background_in_dice", False),
+                class_weights=config.get("class_weights", None),
+            )
+        else:
+            criterion = BCETverskyLoss(
+                alpha=0.3,
+                beta=0.7,
+                bce_weight=0.5,
+                tversky_weight=0.5
+            )
 
         optimizer = torch.optim.Adam(
             model.parameters(),
@@ -330,7 +344,8 @@ if __name__ == "__main__":
         "root_dir": "/home/edxnG14/laia/data/MICCAI_BraTS2020_TrainingData",
         "modalities": ["flair", "t1", "t1ce", "t2"],
         "only_tumor_slices": False,
-        "augment_train": False,        
+        "augment_train": False,
+        "segmentation_type": "multiclass",
 
         # Splits
         "train_split": 0.8,
@@ -338,24 +353,28 @@ if __name__ == "__main__":
 
         # Model
         "in_channels": 4,
-        "out_channels": 1,
+        # 4 classes: 0=fons, 1=necrosi/no realçat, 2=edema, 3=tumor realçat
+        "out_channels": 4,
 
         # Training
         "epochs": 20,
         "batch_size": 8,
         "learning_rate": 1e-4,
         "num_workers": 2,
+        "ce_weight": 0.5,
+        "dice_weight": 0.5,
+        "include_background_in_dice": False,
 
         # Reproductibilitat
         "seed": 42,
 
         # Guardar models
         "models_dir": "results/models",
-        "model_name": "unet_multimodal_20epochs_bce_tversky.pth",
+        "model_name": "unet_multiclass_4modalities_20epochs_ce_dice.pth",
         
         # Guardar historial
         "history_dir": "results/history",
-        "history_name": "unet_multimodal_20epochs_bce_tversky_history.json",
+        "history_name": "unet_multiclass_4modalities_20epochs_ce_dice_history.json",
         
         # Wandb
         "wandb_project": "deep-learning-14",
