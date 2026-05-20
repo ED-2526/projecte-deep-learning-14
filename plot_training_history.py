@@ -7,9 +7,8 @@ import matplotlib.pyplot as plt
 # CONFIGURACIÓ
 # ============================================================
 
-HISTORY_PATH = "results/history/unet_multimodal_patient_split_20epochs_all_slices_history.json"
-
-OUTPUT_DIR = "results/figures_multimodal_all_slices"
+HISTORY_PATH =  "results/history/unet_multiclass_4modalities_20epochs_ce_dice_history.json"
+OUTPUT_DIR = "results/figures_multiclase"
 
 
 # ============================================================
