@@ -41,7 +41,7 @@ CONFIG = {
     "threshold": 0.3,
 
     # Sortida
-    "out_dir": "results/ranked_predictions_tumor_only",
+    "out_dir": "results/ranked_predictions_tumor_only_tversky",
     "num_each": 4,
 }
 
