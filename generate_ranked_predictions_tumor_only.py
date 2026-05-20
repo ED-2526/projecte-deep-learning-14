@@ -35,8 +35,8 @@ CONFIG = {
     "num_workers": 2,
 
     # IMPORTANT: canvia aquest nom si el teu checkpoint té un altre nom
-    "model_path": "results/models/unet_multimodal_patient_split_20epochs_all_slices.pth",
-
+    "model_path": "results/models/unet_multimodal_20epochs_bce_tversky.pth",
+    
     # Millor threshold trobat amb evaluate_thresholds.py
     "threshold": 0.3,
 
