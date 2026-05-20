@@ -29,7 +29,7 @@ CONFIG = {
     "seed": 42,
 
     "batch_size": 1,
-    "num_workers": 2,
+    "num_workers": 0,
 
     "model_path": "results/models/unet_multiclass_4modalities_20epochs_ce_dice.pth",
 
