@@ -1,26 +1,12 @@
 import os
 import json
+import argparse
 import matplotlib.pyplot as plt
 
 
-# ============================================================
-# CONFIGURACIÓ
-# ============================================================
-
-HISTORY_PATH =  "results/history/unet_multiclass_4modalities_20epochs_ce_dice_history.json"
-OUTPUT_DIR = "results/figures_multiclase"
-
-
-# ============================================================
-# FUNCIONS
-# ============================================================
-
 def load_history(history_path):
-    """
-    Carrega l'historial d'entrenament guardat en format JSON.
-    """
     if not os.path.exists(history_path):
-        raise FileNotFoundError(f"No s'ha trobat el fitxer d'historial: {history_path}")
+        raise FileNotFoundError(f"No existeix el fitxer history: {history_path}")
 
     with open(history_path, "r") as f:
         history = json.load(f)
@@ -28,68 +14,115 @@ def load_history(history_path):
     return history
 
 
-def plot_metric(history, train_key, val_key, title, ylabel, save_path):
+def get_metric(history, key):
     """
-    Genera una gràfica comparant una mètrica de train i validation.
+    Retorna una mètrica del history si existeix.
+    Si no existeix, retorna None.
     """
-    plt.figure(figsize=(8, 5))
+    return history.get(key, None)
 
-    if train_key in history:
-        plt.plot(history[train_key], label=train_key)
 
-    if val_key in history:
-        plt.plot(history[val_key], label=val_key)
+def plot_curve(train_values, val_values, title, ylabel, save_path):
+    plt.figure(figsize=(10, 6))
+
+    epochs = range(1, len(train_values) + 1)
+
+    plt.plot(epochs, train_values, marker="o", label=f"train_{ylabel.lower()}")
+    plt.plot(epochs, val_values, marker="o", label=f"val_{ylabel.lower()}")
 
     plt.title(title)
     plt.xlabel("Epoch")
     plt.ylabel(ylabel)
-    plt.legend()
     plt.grid(True)
+    plt.legend()
     plt.tight_layout()
-    plt.savefig(save_path, dpi=300)
+    plt.savefig(save_path, dpi=150)
     plt.close()
 
-    print(f"Gràfica guardada: {save_path}")
 
+def plot_single_curve(values, title, ylabel, save_path):
+    plt.figure(figsize=(10, 6))
 
-# ============================================================
-# MAIN
-# ============================================================
+    epochs = range(1, len(values) + 1)
+
+    plt.plot(epochs, values, marker="o", label=ylabel)
+    plt.title(title)
+    plt.xlabel("Epoch")
+    plt.ylabel(ylabel)
+    plt.grid(True)
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig(save_path, dpi=150)
+    plt.close()
+
 
 def main():
-    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    parser = argparse.ArgumentParser()
 
-    history = load_history(HISTORY_PATH)
-
-    plot_metric(
-        history=history,
-        train_key="train_loss",
-        val_key="val_loss",
-        title="Training vs Validation Loss",
-        ylabel="Loss",
-        save_path=os.path.join(OUTPUT_DIR, "loss_curve.png")
+    parser.add_argument(
+        "--history-path",
+        type=str,
+        default="results/history/unet_multiclass_4modalities_20epochs_ce_dice_history.json",
+        help="Ruta al fitxer history JSON."
     )
 
-    plot_metric(
-        history=history,
-        train_key="train_dice",
-        val_key="val_dice",
-        title="Training vs Validation Dice",
-        ylabel="Dice Score",
-        save_path=os.path.join(OUTPUT_DIR, "dice_curve.png")
+    parser.add_argument(
+        "--out-dir",
+        type=str,
+        default="results/figures_multiclass",
+        help="Carpeta on guardar les figures."
     )
 
-    plot_metric(
-        history=history,
-        train_key="train_iou",
-        val_key="val_iou",
-        title="Training vs Validation IoU",
-        ylabel="IoU",
-        save_path=os.path.join(OUTPUT_DIR, "iou_curve.png")
-    )
+    args = parser.parse_args()
 
-    print("\nGràfiques generades correctament.")
-    print(f"Carpeta de sortida: {OUTPUT_DIR}")
+    os.makedirs(args.out_dir, exist_ok=True)
+
+    history = load_history(args.history_path)
+
+    train_loss = get_metric(history, "train_loss")
+    val_loss = get_metric(history, "val_loss")
+
+    train_dice = get_metric(history, "train_dice")
+    val_dice = get_metric(history, "val_dice")
+
+    train_iou = get_metric(history, "train_iou")
+    val_iou = get_metric(history, "val_iou")
+
+    if train_loss is not None and val_loss is not None:
+        plot_curve(
+            train_values=train_loss,
+            val_values=val_loss,
+            title="Training Loss vs Validation Loss",
+            ylabel="Loss",
+            save_path=os.path.join(args.out_dir, "loss_curve.png")
+        )
+
+    if train_dice is not None and val_dice is not None:
+        plot_curve(
+            train_values=train_dice,
+            val_values=val_dice,
+            title="Training Dice vs Validation Dice",
+            ylabel="Dice",
+            save_path=os.path.join(args.out_dir, "dice_curve.png")
+        )
+
+    if train_iou is not None and val_iou is not None:
+        plot_curve(
+            train_values=train_iou,
+            val_values=val_iou,
+            title="Training IoU vs Validation IoU",
+            ylabel="IoU",
+            save_path=os.path.join(args.out_dir, "iou_curve.png")
+        )
+
+    print("\nGràfiques generades correctament:")
+    print(args.out_dir)
+
+    if "test_loss" in history:
+        print("\nResultats test guardats al history:")
+        print(f"Test Loss: {history.get('test_loss')}")
+        print(f"Test Dice: {history.get('test_dice')}")
+        print(f"Test IoU:  {history.get('test_iou')}")
 
 
 if __name__ == "__main__":
