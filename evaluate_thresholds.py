@@ -33,7 +33,7 @@ CONFIG = {
     "num_workers": 2,
 
     # Canvia aquest path pel nom exacte del teu model guardat
-    "model_path": "results/models/unet_multimodal_patient_split_20epochs_all_slices.pth",
+    "model_path": "results/models/unet_multimodal_20epochs_bce_tversky.pth",
 }
 
 
