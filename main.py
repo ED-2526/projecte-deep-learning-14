@@ -4,8 +4,9 @@ import random
 import numpy as np
 import torch
 import wandb
+import nibabel as nib
 
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, WeightedRandomSampler
 
 from utils.dataset import BraTSSegmentationDataset
 from utils.losses import BCEDiceLoss, BCETverskyLoss, CEDiceLoss
@@ -106,6 +107,90 @@ def split_case_ids(case_ids, train_split, val_split, seed):
 
     return train_case_ids, val_case_ids, test_case_ids
 
+# -----------------------------
+# Weighted sampler per tumors petits
+# -----------------------------
+def get_sample_weight_multiclass(root_dir, case_id, slice_idx):
+    """
+    Calcula el pes d'una slice segons la mida total del tumor.
+
+    En multiclasse:
+        0 = background
+        1 = necrosis / NCR-NET
+        2 = edema
+        3 = enhancing tumor
+
+    Per calcular la mida del tumor, agrupem totes les classes tumorals:
+        tumor = mask > 0
+    """
+
+    seg_path = os.path.join(
+        root_dir,
+        case_id,
+        f"{case_id}_seg.nii"
+    )
+
+    seg = nib.load(seg_path).get_fdata()
+    mask_slice = seg[:, :, slice_idx]
+
+    # En BraTS original:
+    # 0 = background
+    # 1, 2, 4 = classes tumorals
+    # Encara que després el Dataset remapegi 4 -> 3,
+    # aquí només ens importa saber si és tumor o no.
+    tumor_pixels = np.sum(mask_slice > 0)
+
+    if tumor_pixels == 0:
+        return 0.5          # slice sense tumor
+    elif tumor_pixels <= 10:
+        return 10.0         # tumor molt petit
+    elif tumor_pixels <= 100:
+        return 8.0          # tumor petit
+    elif tumor_pixels <= 500:
+        return 4.0          # tumor mitjà-petit
+    elif tumor_pixels <= 1000:
+        return 2.0          # tumor mitjà
+    else:
+        return 1.0          # tumor gran
+
+def create_weighted_sampler_multiclass(dataset, root_dir):
+    """
+    Crea un WeightedRandomSampler per al train_dataset multiclasse.
+
+    Dona més probabilitat a slices amb tumors petits.
+    Això només s'aplica a train, mai a validation ni test.
+    """
+
+    weights = []
+
+    print("\nCalculant pesos per WeightedRandomSampler multiclasse...")
+
+    for sample in dataset.samples:
+        case_id, slice_idx = sample
+
+        weight = get_sample_weight_multiclass(
+            root_dir=root_dir,
+            case_id=case_id,
+            slice_idx=slice_idx
+        )
+
+        weights.append(weight)
+
+    weights = torch.DoubleTensor(weights)
+
+    sampler = WeightedRandomSampler(
+        weights=weights,
+        num_samples=len(weights),
+        replacement=True
+    )
+
+    print("WeightedRandomSampler multiclasse creat.")
+    print(f"Nombre de mostres ponderades: {len(weights)}")
+    print(f"Pes mínim: {weights.min().item():.2f}")
+    print(f"Pes màxim: {weights.max().item():.2f}")
+
+    return sampler
+
 
 # -----------------------------
 # Crear datasets i dataloaders
@@ -160,12 +245,26 @@ def create_dataloaders(config):
         segmentation_type=config["segmentation_type"]
     )
     
-    train_loader = DataLoader(
-        train_dataset,
-        batch_size=config["batch_size"],
-        shuffle=True,
-        num_workers=config["num_workers"]
-    )
+    if config.get("use_weighted_sampler", False):
+        train_sampler = create_weighted_sampler_multiclass(
+            dataset=train_dataset,
+            root_dir=config["root_dir"]
+        )
+    
+        train_loader = DataLoader(
+            train_dataset,
+            batch_size=config["batch_size"],
+            sampler=train_sampler,
+            shuffle=False,
+            num_workers=config["num_workers"]
+        )
+    else:
+        train_loader = DataLoader(
+            train_dataset,
+            batch_size=config["batch_size"],
+            shuffle=True,
+            num_workers=config["num_workers"]
+        )
 
     val_loader = DataLoader(
         val_dataset,
@@ -363,15 +462,20 @@ if __name__ == "__main__":
         "val_split": 0.1,
     
         # Model
-        "architecture": "resunet",
+        "architecture": "unet",
         "in_channels": 4,
         "out_channels": 4,
+    
+        # Weighted sampler
+        "use_weighted_sampler": True,
     
         # Training
         "epochs": 20,
         "batch_size": 8,
         "learning_rate": 1e-4,
         "num_workers": 2,
+    
+        # Loss multiclasse
         "ce_weight": 0.5,
         "dice_weight": 0.5,
         "include_background_in_dice": False,
@@ -381,11 +485,11 @@ if __name__ == "__main__":
     
         # Guardar models
         "models_dir": "results/models",
-        "model_name": "resunet_multiclass_4modalities_20epochs_ce_dice.pth",
+        "model_name": "unet_multiclass_4modalities_20epochs_ce_dice_weighted_sampler.pth",
     
         # Guardar historial
         "history_dir": "results/history",
-        "history_name": "resunet_multiclass_4modalities_20epochs_ce_dice_history.json",
+        "history_name": "unet_multiclass_4modalities_20epochs_ce_dice_weighted_sampler_history.json",
     
         # Wandb
         "wandb_project": "deep-learning-14",
