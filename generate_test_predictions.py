@@ -19,15 +19,15 @@ from utils.dataset import BraTSSegmentationDataset
 CONFIG = {
     "root_dir": "/home/edxnG14/laia/data/MICCAI_BraTS2020_TrainingData",
 
-    "model_path": "results/models/unet_multimodal_patient_split_20epochs_all_slices.pth",
+    "model_path": "results/models/unet_multiclass_4modalities_20epochs_ce_dice.pth",
 
-    "output_dir": "results/predictions_multimodal_all_slices",
+    "output_dir": "results/predictions_multiclase",
 
     "modalities": ["flair", "t1", "t1ce", "t2"],
     "in_channels": 4,
-    "out_channels": 1,
+    "out_channels": 4,
 
-    "segmentation_type": "binary",
+    "segmentation_type": "multiclass",
     "only_tumor_slices": False,
 
     "train_split": 0.8,
