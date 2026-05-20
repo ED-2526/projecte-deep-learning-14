@@ -9,7 +9,7 @@ from torch.utils.data import DataLoader
 
 from utils.dataset import BraTSSegmentationDataset
 from utils.losses import BCEDiceLoss, BCETverskyLoss, CEDiceLoss
-from models.unet import UNet
+from models.unet import UNet, ResUNet
 from train import train, validate_one_epoch
 
 
@@ -252,10 +252,21 @@ def model_pipeline(config):
         config = dict(wandb.config)  # sweep overrides default config values
         train_loader, val_loader, test_loader = create_dataloaders(config)
 
-        model = UNet(
-            in_channels=config["in_channels"],
-            out_channels=config["out_channels"]
-        ).to(device)
+        if config.get("architecture", "unet") == "resunet":
+            model = ResUNet(
+                in_channels=config["in_channels"],
+                out_channels=config["out_channels"]
+            ).to(device)
+        
+            print("Arquitectura utilitzada: ResUNet")
+        
+        else:
+            model = UNet(
+                in_channels=config["in_channels"],
+                out_channels=config["out_channels"]
+            ).to(device)
+        
+            print("Arquitectura utilitzada: UNet")
 
         if config["segmentation_type"] == "multiclass":
             # Sortida multiclasse: logits [B, 4, H, W] i target [B, H, W].
@@ -346,16 +357,16 @@ if __name__ == "__main__":
         "only_tumor_slices": False,
         "augment_train": False,
         "segmentation_type": "multiclass",
-
+    
         # Splits
         "train_split": 0.8,
         "val_split": 0.1,
-
+    
         # Model
+        "architecture": "resunet",
         "in_channels": 4,
-        # 4 classes: 0=fons, 1=necrosi/no realçat, 2=edema, 3=tumor realçat
         "out_channels": 4,
-
+    
         # Training
         "epochs": 20,
         "batch_size": 8,
@@ -364,18 +375,18 @@ if __name__ == "__main__":
         "ce_weight": 0.5,
         "dice_weight": 0.5,
         "include_background_in_dice": False,
-
+    
         # Reproductibilitat
         "seed": 42,
-
+    
         # Guardar models
         "models_dir": "results/models",
-        "model_name": "unet_multiclass_4modalities_20epochs_ce_dice.pth",
-        
+        "model_name": "resunet_multiclass_4modalities_20epochs_ce_dice.pth",
+    
         # Guardar historial
         "history_dir": "results/history",
-        "history_name": "unet_multiclass_4modalities_20epochs_ce_dice_history.json",
-        
+        "history_name": "resunet_multiclass_4modalities_20epochs_ce_dice_history.json",
+    
         # Wandb
         "wandb_project": "deep-learning-14",
         "wandb_mode": "online"
