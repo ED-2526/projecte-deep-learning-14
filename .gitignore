@@ -145,3 +145,4 @@ results/models/
 *.onnx
 __pycache__/
 .DS_Store
+results.tar.gz
