@@ -455,7 +455,7 @@ if __name__ == "__main__":
         "modalities": ["flair", "t1", "t1ce", "t2"],
         "only_tumor_slices": False,
         "augment_train": False,
-        "segmentation_type": "multiclass",
+        "segmentation_type": "binary",
     
         # Splits
         "train_split": 0.8,
@@ -464,7 +464,7 @@ if __name__ == "__main__":
         # Model
         "architecture": "unet",
         "in_channels": 4,
-        "out_channels": 4,
+        "out_channels": 1,
     
         # Weighted sampler
         "use_weighted_sampler": True,
@@ -475,21 +475,16 @@ if __name__ == "__main__":
         "learning_rate": 1e-4,
         "num_workers": 2,
     
-        # Loss multiclasse
-        "ce_weight": 0.5,
-        "dice_weight": 0.5,
-        "include_background_in_dice": False,
-    
         # Reproductibilitat
         "seed": 42,
     
         # Guardar models
         "models_dir": "results/models",
-        "model_name": "unet_multiclass_4modalities_20epochs_ce_dice_weighted_sampler.pth",
+        "model_name": "unet_binary_4modalities_20epochs_bce_dice_weighted_sampler.pth",
     
         # Guardar historial
         "history_dir": "results/history",
-        "history_name": "unet_multiclass_4modalities_20epochs_ce_dice_weighted_sampler_history.json",
+        "history_name": "unet_binary_4modalities_20epochs_bce_dice_weighted_sampler_history.json",
     
         # Wandb
         "wandb_project": "deep-learning-14",
