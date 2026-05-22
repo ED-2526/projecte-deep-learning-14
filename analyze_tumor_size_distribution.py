@@ -25,7 +25,7 @@ def parse_args():
     parser.add_argument(
         "--model-path",
         type=str,
-        default="results/models/unet_multiclass_4modalities_20epochs_ce_dice.pth"
+        required=True
     )
 
     parser.add_argument(
@@ -34,6 +34,15 @@ def parse_args():
         default="unet",
         choices=["unet", "resunet"]
     )
+
+    parser.add_argument(
+        "--segmentation-type",
+        type=str,
+        default="binary",
+        choices=["binary"]
+    )
+
+    parser.add_argument("--threshold", type=float, default=0.3)
 
     parser.add_argument("--batch-size", type=int, default=1)
     parser.add_argument("--num-workers", type=int, default=0)
@@ -66,12 +75,10 @@ def get_case_ids(root_dir):
 
 def split_case_ids(case_ids, train_split, val_split, seed):
     case_ids = list(case_ids)
-
     rng = random.Random(seed)
     rng.shuffle(case_ids)
 
     total_cases = len(case_ids)
-
     train_size = int(train_split * total_cases)
     val_size = int(val_split * total_cases)
 
@@ -86,32 +93,30 @@ def split_case_ids(case_ids, train_split, val_split, seed):
     return train_case_ids, val_case_ids, test_case_ids
 
 
-def normalize_mask_shape(mask):
-    if isinstance(mask, torch.Tensor):
-        mask = mask.detach().cpu()
+def create_model(architecture, device):
+    if architecture == "resunet":
+        model = ResUNet(
+            in_channels=4,
+            out_channels=1
+        ).to(device)
+        print("Arquitectura utilitzada: ResUNet")
+    else:
+        model = UNet(
+            in_channels=4,
+            out_channels=1
+        ).to(device)
+        print("Arquitectura utilitzada: UNet")
 
-    if mask.ndim == 3:
-        mask = mask.squeeze(0)
-
-    return mask.numpy()
+    return model
 
 
-def compute_binary_metrics_from_multiclass(pred, mask, smooth=1e-6):
-    """
-    Converteix multiclasse a binari:
-        0 = background
-        >0 = tumor
-    """
+def compute_slice_metrics(pred, mask, smooth=1e-6):
+    pred = pred.float().view(-1)
+    mask = mask.float().view(-1)
 
-    pred_tumor = (pred > 0).astype(np.float32)
-    mask_tumor = (mask > 0).astype(np.float32)
-
-    pred_flat = pred_tumor.reshape(-1)
-    mask_flat = mask_tumor.reshape(-1)
-
-    intersection = np.sum(pred_flat * mask_flat)
-    pred_sum = np.sum(pred_flat)
-    mask_sum = np.sum(mask_flat)
+    intersection = (pred * mask).sum()
+    pred_sum = pred.sum()
+    mask_sum = mask.sum()
 
     union = pred_sum + mask_sum - intersection
 
@@ -121,44 +126,12 @@ def compute_binary_metrics_from_multiclass(pred, mask, smooth=1e-6):
     recall = (intersection + smooth) / (mask_sum + smooth)
 
     return {
-        "dice": float(dice),
-        "iou": float(iou),
-        "precision": float(precision),
-        "recall": float(recall),
-        "gt_pixels": float(mask_sum),
-        "pred_pixels": float(pred_sum),
-    }
-
-
-def compute_class_metrics(pred, mask, class_id, smooth=1e-6):
-    """
-    Mètriques one-vs-rest per una classe concreta.
-    """
-
-    pred_class = (pred == class_id).astype(np.float32)
-    mask_class = (mask == class_id).astype(np.float32)
-
-    pred_flat = pred_class.reshape(-1)
-    mask_flat = mask_class.reshape(-1)
-
-    intersection = np.sum(pred_flat * mask_flat)
-    pred_sum = np.sum(pred_flat)
-    mask_sum = np.sum(mask_flat)
-
-    union = pred_sum + mask_sum - intersection
-
-    dice = (2.0 * intersection + smooth) / (pred_sum + mask_sum + smooth)
-    iou = (intersection + smooth) / (union + smooth)
-    precision = (intersection + smooth) / (pred_sum + smooth)
-    recall = (intersection + smooth) / (mask_sum + smooth)
-
-    return {
-        "dice": float(dice),
-        "iou": float(iou),
-        "precision": float(precision),
-        "recall": float(recall),
-        "gt_pixels": float(mask_sum),
-        "pred_pixels": float(pred_sum),
+        "dice": dice.item(),
+        "iou": iou.item(),
+        "precision": precision.item(),
+        "recall": recall.item(),
+        "gt_pixels": mask_sum.item(),
+        "pred_pixels": pred_sum.item(),
     }
 
 
@@ -205,47 +178,10 @@ def init_stats():
     return stats
 
 
-def init_class_stats():
-    class_stats = {}
-
-    for class_id in [1, 2, 3]:
-        class_stats[class_id] = {
-            "count_present": 0,
-            "dice": [],
-            "iou": [],
-            "precision": [],
-            "recall": [],
-            "gt_pixels": [],
-            "pred_pixels": [],
-            "false_negative_complete": 0,
-        }
-
-    return class_stats
-
-
-def create_model(architecture, device):
-    if architecture == "resunet":
-        model = ResUNet(
-            in_channels=4,
-            out_channels=4
-        ).to(device)
-        print("Arquitectura utilitzada: ResUNet")
-    else:
-        model = UNet(
-            in_channels=4,
-            out_channels=4
-        ).to(device)
-        print("Arquitectura utilitzada: UNet")
-
-    return model
-
-
-def print_category_stats(stats):
+def print_stats(stats):
     total_slices = sum(stats[cat]["count"] for cat in stats)
-    total_tumor_slices = sum(
-        stats[cat]["count"] for cat in stats if cat != "0 pixels"
-    )
     total_empty_slices = stats["0 pixels"]["count"]
+    total_tumor_slices = total_slices - total_empty_slices
 
     print("\n" + "=" * 80)
     print("RESUM GENERAL")
@@ -259,7 +195,7 @@ def print_category_stats(stats):
         print(f"% slices amb tumor: {100 * total_tumor_slices / total_slices:.2f}%")
 
     print("\n" + "=" * 80)
-    print("DISTRIBUCIÓ I RENDIMENT BINARI PER MIDA DE TUMOR")
+    print("DISTRIBUCIÓ I RENDIMENT PER MIDA DE TUMOR")
     print("=" * 80)
 
     for category, values in stats.items():
@@ -275,53 +211,6 @@ def print_category_stats(stats):
 
         print(f"Percentatge del test: {100 * count / total_slices:.2f}%")
 
-        dice_mean = np.mean(values["dice"])
-        iou_mean = np.mean(values["iou"])
-        precision_mean = np.mean(values["precision"])
-        recall_mean = np.mean(values["recall"])
-        gt_mean = np.mean(values["gt_pixels"])
-        pred_mean = np.mean(values["pred_pixels"])
-
-        print(f"GT pixels mitjana:   {gt_mean:.2f}")
-        print(f"Pred pixels mitjana: {pred_mean:.2f}")
-        print(f"Dice mitjà:          {dice_mean:.4f}")
-        print(f"IoU mitjà:           {iou_mean:.4f}")
-        print(f"Precision mitjana:   {precision_mean:.4f}")
-        print(f"Recall mitjà:        {recall_mean:.4f}")
-
-        if category != "0 pixels":
-            fn_complete = values["false_negative_complete"]
-            print(f"Falsos negatius complets: {fn_complete}")
-            print(f"% FN complets dins categoria: {100 * fn_complete / count:.2f}%")
-        else:
-            fp = values["false_positive"]
-            print(f"Falsos positius en slices buides: {fp}")
-            print(f"% FP dins slices buides: {100 * fp / count:.2f}%")
-
-
-def print_class_stats(class_stats):
-    print("\n" + "=" * 80)
-    print("MÈTRIQUES PER CLASSE MULTICLASSE")
-    print("=" * 80)
-
-    class_names = {
-        1: "Necrosis / NCR-NET",
-        2: "Edema",
-        3: "Enhancing tumor",
-    }
-
-    for class_id, values in class_stats.items():
-        print("\n" + "-" * 80)
-        print(f"Classe {class_id}: {class_names[class_id]}")
-        print("-" * 80)
-
-        count = values["count_present"]
-        print(f"Slices on la classe apareix a GT: {count}")
-
-        if len(values["dice"]) == 0:
-            print("No hi ha mostres per aquesta classe.")
-            continue
-
         print(f"GT pixels mitjana:   {np.mean(values['gt_pixels']):.2f}")
         print(f"Pred pixels mitjana: {np.mean(values['pred_pixels']):.2f}")
         print(f"Dice mitjà:          {np.mean(values['dice']):.4f}")
@@ -329,10 +218,14 @@ def print_class_stats(class_stats):
         print(f"Precision mitjana:   {np.mean(values['precision']):.4f}")
         print(f"Recall mitjà:        {np.mean(values['recall']):.4f}")
 
-        fn_complete = values["false_negative_complete"]
-        if count > 0:
-            print(f"Falsos negatius complets: {fn_complete}")
-            print(f"% FN complets: {100 * fn_complete / count:.2f}%")
+        if category == "0 pixels":
+            fp = values["false_positive"]
+            print(f"Falsos positius en slices buides: {fp}")
+            print(f"% FP dins slices buides: {100 * fp / count:.2f}%")
+        else:
+            fn = values["false_negative_complete"]
+            print(f"Falsos negatius complets: {fn}")
+            print(f"% FN complets dins categoria: {100 * fn / count:.2f}%")
 
 
 def main():
@@ -362,7 +255,7 @@ def main():
         modalities=["flair", "t1", "t1ce", "t2"],
         only_tumor_slices=False,
         augment=False,
-        segmentation_type="multiclass"
+        segmentation_type="binary"
     )
 
     print("Slices test totals:", len(test_dataset))
@@ -375,42 +268,39 @@ def main():
     )
 
     print("\nCarregant model...")
-    model = create_model(args.architecture, device)
+    print(f"Checkpoint carregat: {args.model_path}")
+    print(f"Threshold utilitzat: {args.threshold}")
 
+    model = create_model(args.architecture, device)
     checkpoint = torch.load(args.model_path, map_location=device)
     model.load_state_dict(checkpoint)
     model.eval()
 
     stats = init_stats()
-    class_stats = init_class_stats()
 
-    print("\nAnalitzant distribució de mida tumoral i mètriques per classe...")
+    print("\nAnalitzant distribució de mida tumoral i rendiment per categoria...")
 
     with torch.no_grad():
         for idx, (images, masks) in enumerate(test_loader):
             images = images.to(device)
+            masks = masks.to(device)
 
             outputs = model(images)
-            preds = torch.argmax(outputs, dim=1)
+            probs = torch.sigmoid(outputs)
+            preds = (probs > args.threshold).float()
 
-            pred_np = preds[0].detach().cpu().numpy()
-            mask_np = normalize_mask_shape(masks[0])
+            metrics = compute_slice_metrics(preds[0], masks[0])
 
-            binary_metrics = compute_binary_metrics_from_multiclass(
-                pred=pred_np,
-                mask=mask_np
-            )
-
-            gt_pixels = binary_metrics["gt_pixels"]
-            pred_pixels = binary_metrics["pred_pixels"]
+            gt_pixels = metrics["gt_pixels"]
+            pred_pixels = metrics["pred_pixels"]
 
             category = get_size_category(gt_pixels)
 
             stats[category]["count"] += 1
-            stats[category]["dice"].append(binary_metrics["dice"])
-            stats[category]["iou"].append(binary_metrics["iou"])
-            stats[category]["precision"].append(binary_metrics["precision"])
-            stats[category]["recall"].append(binary_metrics["recall"])
+            stats[category]["dice"].append(metrics["dice"])
+            stats[category]["iou"].append(metrics["iou"])
+            stats[category]["precision"].append(metrics["precision"])
+            stats[category]["recall"].append(metrics["recall"])
             stats[category]["gt_pixels"].append(gt_pixels)
             stats[category]["pred_pixels"].append(pred_pixels)
 
@@ -420,33 +310,10 @@ def main():
             if gt_pixels == 0 and pred_pixels > 0:
                 stats[category]["false_positive"] += 1
 
-            for class_id in [1, 2, 3]:
-                class_metrics = compute_class_metrics(
-                    pred=pred_np,
-                    mask=mask_np,
-                    class_id=class_id
-                )
-
-                class_gt_pixels = class_metrics["gt_pixels"]
-                class_pred_pixels = class_metrics["pred_pixels"]
-
-                if class_gt_pixels > 0:
-                    class_stats[class_id]["count_present"] += 1
-                    class_stats[class_id]["dice"].append(class_metrics["dice"])
-                    class_stats[class_id]["iou"].append(class_metrics["iou"])
-                    class_stats[class_id]["precision"].append(class_metrics["precision"])
-                    class_stats[class_id]["recall"].append(class_metrics["recall"])
-                    class_stats[class_id]["gt_pixels"].append(class_gt_pixels)
-                    class_stats[class_id]["pred_pixels"].append(class_pred_pixels)
-
-                    if class_pred_pixels == 0:
-                        class_stats[class_id]["false_negative_complete"] += 1
-
             if idx % 500 == 0:
                 print(f"Processades {idx}/{len(test_dataset)} slices...")
 
-    print_category_stats(stats)
-    print_class_stats(class_stats)
+    print_stats(stats)
 
     print("\n" + "=" * 80)
     print("FI DE L'ANÀLISI")
