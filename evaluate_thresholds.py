@@ -1,45 +1,64 @@
 import os
 import random
+import argparse
 import numpy as np
 import torch
+
 from torch.utils.data import DataLoader
 
 from utils.dataset import BraTSSegmentationDataset
-from models.unet import UNet
+from models.unet import UNet, ResUNet
 
 
-# -----------------------------
-# Configuració
-# -----------------------------
-CONFIG = {
-    "root_dir": os.environ.get(
-        "DATA_ROOT",
-        "/home/edxnG14/laia/data/MICCAI_BraTS2020_TrainingData"
-    ),
+def parse_args():
+    parser = argparse.ArgumentParser()
 
-    # IMPORTANT: model multimodal
-    "modalities": ["flair", "t1", "t1ce", "t2"],
-    "in_channels": 4,
+    parser.add_argument(
+        "--root-dir",
+        type=str,
+        default=os.environ.get(
+            "DATA_ROOT",
+            "/home/edxnG14/laia/data/MICCAI_BraTS2020_TrainingData"
+        )
+    )
 
-    # IMPORTANT: totes les slices
-    "only_tumor_slices": False,
+    parser.add_argument(
+        "--model-path",
+        type=str,
+        required=True
+    )
 
-    # Igual que al main.py
-    "train_split": 0.8,
-    "val_split": 0.1,
-    "seed": 42,
+    parser.add_argument(
+        "--architecture",
+        type=str,
+        default="unet",
+        choices=["unet", "resunet"]
+    )
 
-    "batch_size": 8,
-    "num_workers": 2,
+    parser.add_argument(
+        "--segmentation-type",
+        type=str,
+        default="binary",
+        choices=["binary"]
+    )
 
-    # Canvia aquest path pel nom exacte del teu model guardat
-    "model_path": "results/models/unet_multimodal_20epochs_bce_tversky.pth",
-}
+    parser.add_argument(
+        "--thresholds",
+        type=float,
+        nargs="+",
+        default=[0.2, 0.3, 0.4, 0.5]
+    )
+
+    parser.add_argument("--batch-size", type=int, default=1)
+    parser.add_argument("--num-workers", type=int, default=0)
+
+    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--train-split", type=float, default=0.8)
+    parser.add_argument("--val-split", type=float, default=0.1)
+
+    return parser.parse_args()
 
 
-# -----------------------------
-# Reproductibilitat
-# -----------------------------
 def set_seed(seed):
     random.seed(seed)
     np.random.seed(seed)
@@ -47,9 +66,6 @@ def set_seed(seed):
     torch.cuda.manual_seed_all(seed)
 
 
-# -----------------------------
-# Obtenir pacients
-# -----------------------------
 def get_case_ids(root_dir):
     case_ids = sorted([
         folder for folder in os.listdir(root_dir)
@@ -62,9 +78,6 @@ def get_case_ids(root_dir):
     return case_ids
 
 
-# -----------------------------
-# Split per pacients
-# -----------------------------
 def split_case_ids(case_ids, train_split, val_split, seed):
     case_ids = list(case_ids)
     rng = random.Random(seed)
@@ -85,15 +98,26 @@ def split_case_ids(case_ids, train_split, val_split, seed):
     return train_case_ids, val_case_ids, test_case_ids
 
 
-# -----------------------------
-# Mètriques amb threshold variable
-# -----------------------------
-def compute_metrics(outputs, masks, threshold=0.5, smooth=1e-6):
-    probs = torch.sigmoid(outputs)
-    preds = (probs > threshold).float()
+def create_model(architecture, device):
+    if architecture == "resunet":
+        model = ResUNet(
+            in_channels=4,
+            out_channels=1
+        ).to(device)
+        print("Arquitectura utilitzada: ResUNet")
+    else:
+        model = UNet(
+            in_channels=4,
+            out_channels=1
+        ).to(device)
+        print("Arquitectura utilitzada: UNet")
 
-    preds = preds.view(-1)
-    masks = masks.view(-1)
+    return model
+
+
+def compute_metrics(preds, masks, smooth=1e-6):
+    preds = preds.float().view(-1)
+    masks = masks.float().view(-1)
 
     intersection = (preds * masks).sum()
     pred_sum = preds.sum()
@@ -103,74 +127,27 @@ def compute_metrics(outputs, masks, threshold=0.5, smooth=1e-6):
 
     dice = (2.0 * intersection + smooth) / (pred_sum + mask_sum + smooth)
     iou = (intersection + smooth) / (union + smooth)
-
     precision = (intersection + smooth) / (pred_sum + smooth)
     recall = (intersection + smooth) / (mask_sum + smooth)
 
-    return (
-        dice.item(),
-        iou.item(),
-        precision.item(),
-        recall.item()
-    )
+    return dice.item(), iou.item(), precision.item(), recall.item()
 
 
-# -----------------------------
-# Avaluar un threshold
-# -----------------------------
-def evaluate_threshold(model, loader, device, threshold):
-    model.eval()
-
-    total_dice = 0.0
-    total_iou = 0.0
-    total_precision = 0.0
-    total_recall = 0.0
-    num_batches = 0
-
-    with torch.no_grad():
-        for images, masks in loader:
-            images = images.to(device)
-            masks = masks.to(device)
-
-            outputs = model(images)
-
-            dice, iou, precision, recall = compute_metrics(
-                outputs,
-                masks,
-                threshold=threshold
-            )
-
-            total_dice += dice
-            total_iou += iou
-            total_precision += precision
-            total_recall += recall
-            num_batches += 1
-
-    return {
-        "dice": total_dice / num_batches,
-        "iou": total_iou / num_batches,
-        "precision": total_precision / num_batches,
-        "recall": total_recall / num_batches,
-    }
-
-
-# -----------------------------
-# Main
-# -----------------------------
 def main():
-    set_seed(CONFIG["seed"])
+    args = parse_args()
+    set_seed(args.seed)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print("Device:", device)
 
     print("\nCarregant pacients...")
-    case_ids = get_case_ids(CONFIG["root_dir"])
+    case_ids = get_case_ids(args.root_dir)
 
     _, _, test_case_ids = split_case_ids(
         case_ids=case_ids,
-        train_split=CONFIG["train_split"],
-        val_split=CONFIG["val_split"],
-        seed=CONFIG["seed"]
+        train_split=args.train_split,
+        val_split=args.val_split,
+        seed=args.seed
     )
 
     print("Pacients totals:", len(case_ids))
@@ -178,58 +155,75 @@ def main():
 
     print("\nCreant test dataset...")
     test_dataset = BraTSSegmentationDataset(
-        root_dir=CONFIG["root_dir"],
+        root_dir=args.root_dir,
         case_ids=test_case_ids,
-        modalities=CONFIG["modalities"],
-        only_tumor_slices=CONFIG["only_tumor_slices"],
-        augment=False
+        modalities=["flair", "t1", "t1ce", "t2"],
+        only_tumor_slices=False,
+        augment=False,
+        segmentation_type="binary"
     )
 
     print("Slices test:", len(test_dataset))
 
     test_loader = DataLoader(
         test_dataset,
-        batch_size=CONFIG["batch_size"],
+        batch_size=args.batch_size,
         shuffle=False,
-        num_workers=CONFIG["num_workers"]
+        num_workers=args.num_workers
     )
 
     print("\nCarregant model...")
-    model = UNet(
-        in_channels=CONFIG["in_channels"],
-        out_channels=1
-    ).to(device)
+    print(f"Checkpoint carregat: {args.model_path}")
 
-    checkpoint = torch.load(CONFIG["model_path"], map_location=device)
+    model = create_model(args.architecture, device)
+    checkpoint = torch.load(args.model_path, map_location=device)
     model.load_state_dict(checkpoint)
-
-    thresholds = [0.2, 0.3, 0.4, 0.5]
-
-    print("\nAvaluació per threshold:")
-    print("-" * 70)
+    model.eval()
 
     best_threshold = None
-    best_dice = -1
+    best_dice = -1.0
 
-    for threshold in thresholds:
-        metrics = evaluate_threshold(
-            model=model,
-            loader=test_loader,
-            device=device,
-            threshold=threshold
-        )
+    print("\nAvaluació per threshold:")
 
-        print(f"Threshold: {threshold}")
-        print(f"  Dice:      {metrics['dice']:.4f}")
-        print(f"  IoU:       {metrics['iou']:.4f}")
-        print(f"  Precision: {metrics['precision']:.4f}")
-        print(f"  Recall:    {metrics['recall']:.4f}")
+    for threshold in args.thresholds:
+        dice_scores = []
+        iou_scores = []
+        precision_scores = []
+        recall_scores = []
+
+        with torch.no_grad():
+            for images, masks in test_loader:
+                images = images.to(device)
+                masks = masks.to(device)
+
+                outputs = model(images)
+                probs = torch.sigmoid(outputs)
+                preds = (probs > threshold).float()
+
+                dice, iou, precision, recall = compute_metrics(preds, masks)
+
+                dice_scores.append(dice)
+                iou_scores.append(iou)
+                precision_scores.append(precision)
+                recall_scores.append(recall)
+
+        mean_dice = np.mean(dice_scores)
+        mean_iou = np.mean(iou_scores)
+        mean_precision = np.mean(precision_scores)
+        mean_recall = np.mean(recall_scores)
+
         print("-" * 70)
+        print(f"Threshold: {threshold}")
+        print(f"  Dice:      {mean_dice:.4f}")
+        print(f"  IoU:       {mean_iou:.4f}")
+        print(f"  Precision: {mean_precision:.4f}")
+        print(f"  Recall:    {mean_recall:.4f}")
 
-        if metrics["dice"] > best_dice:
-            best_dice = metrics["dice"]
+        if mean_dice > best_dice:
+            best_dice = mean_dice
             best_threshold = threshold
 
+    print("-" * 70)
     print(f"\nMillor threshold segons Dice: {best_threshold}")
     print(f"Millor Dice: {best_dice:.4f}")
 
