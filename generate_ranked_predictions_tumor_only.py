@@ -1,5 +1,6 @@
 import os
 import random
+import argparse
 import numpy as np
 import torch
 import matplotlib.pyplot as plt
@@ -7,35 +8,49 @@ import matplotlib.pyplot as plt
 from torch.utils.data import DataLoader
 
 from utils.dataset import BraTSSegmentationDataset
-from models.unet import UNet
+from models.unet import UNet, ResUNet
 
 
-CONFIG = {
-    "root_dir": os.environ.get(
-        "DATA_ROOT",
-        "/home/edxnG14/laia/data/MICCAI_BraTS2020_TrainingData"
-    ),
+def parse_args():
+    parser = argparse.ArgumentParser()
 
-    "modalities": ["flair", "t1", "t1ce", "t2"],
+    parser.add_argument(
+        "--root-dir",
+        type=str,
+        default=os.environ.get(
+            "DATA_ROOT",
+            "/home/edxnG14/laia/data/MICCAI_BraTS2020_TrainingData"
+        )
+    )
 
-    "segmentation_type": "multiclass",
-    "in_channels": 4,
-    "out_channels": 4,
+    parser.add_argument(
+        "--model-path",
+        type=str,
+        default="results/models/unet_multiclass_4modalities_20epochs_ce_dice.pth"
+    )
 
-    "only_tumor_slices": False,
+    parser.add_argument(
+        "--architecture",
+        type=str,
+        default="unet",
+        choices=["unet", "resunet"]
+    )
 
-    "train_split": 0.8,
-    "val_split": 0.1,
-    "seed": 42,
+    parser.add_argument(
+        "--out-dir",
+        type=str,
+        default="results/ranked_predictions_tumor_only_multiclass"
+    )
 
-    "batch_size": 1,
-    "num_workers": 0,
+    parser.add_argument("--num-each", type=int, default=4)
+    parser.add_argument("--batch-size", type=int, default=1)
+    parser.add_argument("--num-workers", type=int, default=0)
 
-    "model_path": "results/models/unet_multiclass_4modalities_20epochs_ce_dice.pth",
+    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--train-split", type=float, default=0.8)
+    parser.add_argument("--val-split", type=float, default=0.1)
 
-    "out_dir": "results/ranked_predictions_tumor_only_multiclass",
-    "num_each": 4,
-}
+    return parser.parse_args()
 
 
 def set_seed(seed):
@@ -59,10 +74,12 @@ def get_case_ids(root_dir):
 
 def split_case_ids(case_ids, train_split, val_split, seed):
     case_ids = list(case_ids)
+
     rng = random.Random(seed)
     rng.shuffle(case_ids)
 
     total_cases = len(case_ids)
+
     train_size = int(train_split * total_cases)
     val_size = int(val_split * total_cases)
 
@@ -78,9 +95,6 @@ def split_case_ids(case_ids, train_split, val_split, seed):
 
 
 def normalize_mask_shape(mask):
-    """
-    Converteix la màscara a [H, W].
-    """
     if isinstance(mask, torch.Tensor):
         mask = mask.detach().cpu()
 
@@ -91,16 +105,6 @@ def normalize_mask_shape(mask):
 
 
 def binary_dice_from_multiclass(pred, mask, smooth=1e-6):
-    """
-    Calcula Dice binari tumor/no tumor a partir de predicció multiclasse.
-
-    pred:
-        [H, W] amb classes 0,1,2,3
-
-    mask:
-        [H, W] amb classes 0,1,2,3
-    """
-
     pred_tumor = (pred > 0).astype(np.float32)
     mask_tumor = (mask > 0).astype(np.float32)
 
@@ -114,6 +118,23 @@ def binary_dice_from_multiclass(pred, mask, smooth=1e-6):
     dice = (2.0 * intersection + smooth) / (pred_sum + mask_sum + smooth)
 
     return float(dice), int(mask_sum), int(pred_sum)
+
+
+def create_model(architecture, device):
+    if architecture == "resunet":
+        model = ResUNet(
+            in_channels=4,
+            out_channels=4
+        ).to(device)
+        print("Arquitectura utilitzada: ResUNet")
+    else:
+        model = UNet(
+            in_channels=4,
+            out_channels=4
+        ).to(device)
+        print("Arquitectura utilitzada: UNet")
+
+    return model
 
 
 def save_prediction_figure(image, mask, pred, dice, gt_pixels, pred_pixels, save_path, title):
@@ -166,21 +187,22 @@ def save_prediction_figure(image, mask, pred, dice, gt_pixels, pred_pixels, save
 
 
 def main():
-    set_seed(CONFIG["seed"])
+    args = parse_args()
+    set_seed(args.seed)
 
-    os.makedirs(CONFIG["out_dir"], exist_ok=True)
+    os.makedirs(args.out_dir, exist_ok=True)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print("Device:", device)
 
     print("\nCarregant pacients...")
-    case_ids = get_case_ids(CONFIG["root_dir"])
+    case_ids = get_case_ids(args.root_dir)
 
     _, _, test_case_ids = split_case_ids(
         case_ids=case_ids,
-        train_split=CONFIG["train_split"],
-        val_split=CONFIG["val_split"],
-        seed=CONFIG["seed"]
+        train_split=args.train_split,
+        val_split=args.val_split,
+        seed=args.seed
     )
 
     print("Pacients totals:", len(case_ids))
@@ -188,30 +210,27 @@ def main():
 
     print("\nCreant test dataset...")
     test_dataset = BraTSSegmentationDataset(
-        root_dir=CONFIG["root_dir"],
+        root_dir=args.root_dir,
         case_ids=test_case_ids,
-        modalities=CONFIG["modalities"],
-        only_tumor_slices=CONFIG["only_tumor_slices"],
+        modalities=["flair", "t1", "t1ce", "t2"],
+        only_tumor_slices=False,
         augment=False,
-        segmentation_type=CONFIG["segmentation_type"]
+        segmentation_type="multiclass"
     )
 
     print("Slices test totals:", len(test_dataset))
 
     test_loader = DataLoader(
         test_dataset,
-        batch_size=CONFIG["batch_size"],
+        batch_size=args.batch_size,
         shuffle=False,
-        num_workers=CONFIG["num_workers"]
+        num_workers=args.num_workers
     )
 
     print("\nCarregant model...")
-    model = UNet(
-        in_channels=CONFIG["in_channels"],
-        out_channels=CONFIG["out_channels"]
-    ).to(device)
+    model = create_model(args.architecture, device)
 
-    checkpoint = torch.load(CONFIG["model_path"], map_location=device)
+    checkpoint = torch.load(args.model_path, map_location=device)
     model.load_state_dict(checkpoint)
     model.eval()
 
@@ -261,7 +280,7 @@ def main():
     print("\nOrdenant resultats només amb slices tumorals...")
     results_sorted = sorted(results, key=lambda x: x["dice"])
 
-    n = CONFIG["num_each"]
+    n = args.num_each
 
     worst = results_sorted[:n]
     best = results_sorted[-n:]
@@ -283,7 +302,7 @@ def main():
     print("\nGuardant figures...")
 
     for group_name, group_results in groups.items():
-        group_dir = os.path.join(CONFIG["out_dir"], group_name)
+        group_dir = os.path.join(args.out_dir, group_name)
         os.makedirs(group_dir, exist_ok=True)
 
         for i, item in enumerate(group_results, start=1):
@@ -312,11 +331,11 @@ def main():
             )
 
     print("\nFet!")
-    print(f"Figures guardades a: {CONFIG['out_dir']}")
+    print(f"Figures guardades a: {args.out_dir}")
     print("\nCarpetes generades:")
-    print(f"- {CONFIG['out_dir']}/best")
-    print(f"- {CONFIG['out_dir']}/middle")
-    print(f"- {CONFIG['out_dir']}/worst")
+    print(f"- {args.out_dir}/best")
+    print(f"- {args.out_dir}/middle")
+    print(f"- {args.out_dir}/worst")
 
 
 if __name__ == "__main__":
