@@ -26,7 +26,7 @@ def parse_args():
     parser.add_argument(
         "--model-path",
         type=str,
-        default="results/models/unet_multiclass_4modalities_20epochs_ce_dice.pth"
+        required=True
     )
 
     parser.add_argument(
@@ -37,9 +37,18 @@ def parse_args():
     )
 
     parser.add_argument(
+        "--segmentation-type",
+        type=str,
+        default="binary",
+        choices=["binary"]
+    )
+
+    parser.add_argument("--threshold", type=float, default=0.3)
+
+    parser.add_argument(
         "--out-dir",
         type=str,
-        default="results/ranked_predictions_tumor_only_multiclass"
+        required=True
     )
 
     parser.add_argument("--num-each", type=int, default=4)
@@ -74,12 +83,10 @@ def get_case_ids(root_dir):
 
 def split_case_ids(case_ids, train_split, val_split, seed):
     case_ids = list(case_ids)
-
     rng = random.Random(seed)
     rng.shuffle(case_ids)
 
     total_cases = len(case_ids)
-
     train_size = int(train_split * total_cases)
     val_size = int(val_split * total_cases)
 
@@ -94,62 +101,53 @@ def split_case_ids(case_ids, train_split, val_split, seed):
     return train_case_ids, val_case_ids, test_case_ids
 
 
-def normalize_mask_shape(mask):
-    if isinstance(mask, torch.Tensor):
-        mask = mask.detach().cpu()
-
-    if mask.ndim == 3:
-        mask = mask.squeeze(0)
-
-    return mask.numpy()
-
-
-def binary_dice_from_multiclass(pred, mask, smooth=1e-6):
-    pred_tumor = (pred > 0).astype(np.float32)
-    mask_tumor = (mask > 0).astype(np.float32)
-
-    pred_flat = pred_tumor.reshape(-1)
-    mask_flat = mask_tumor.reshape(-1)
-
-    intersection = np.sum(pred_flat * mask_flat)
-    pred_sum = np.sum(pred_flat)
-    mask_sum = np.sum(mask_flat)
-
-    dice = (2.0 * intersection + smooth) / (pred_sum + mask_sum + smooth)
-
-    return float(dice), int(mask_sum), int(pred_sum)
-
-
 def create_model(architecture, device):
     if architecture == "resunet":
         model = ResUNet(
             in_channels=4,
-            out_channels=4
+            out_channels=1
         ).to(device)
         print("Arquitectura utilitzada: ResUNet")
     else:
         model = UNet(
             in_channels=4,
-            out_channels=4
+            out_channels=1
         ).to(device)
         print("Arquitectura utilitzada: UNet")
 
     return model
 
 
-def save_prediction_figure(image, mask, pred, dice, gt_pixels, pred_pixels, save_path, title):
+def dice_per_slice(pred, mask, smooth=1e-6):
+    pred = pred.float().view(-1)
+    mask = mask.float().view(-1)
+
+    intersection = (pred * mask).sum()
+    pred_sum = pred.sum()
+    mask_sum = mask.sum()
+
+    dice = (2.0 * intersection + smooth) / (pred_sum + mask_sum + smooth)
+
+    return dice.item(), int(mask_sum.item()), int(pred_sum.item())
+
+
+def save_prediction_figure(image, mask, pred, prob, dice, save_path, title):
     image = image.detach().cpu().numpy()
+    mask = mask.detach().cpu().numpy()
 
-    if isinstance(mask, torch.Tensor):
-        mask = normalize_mask_shape(mask)
+    if mask.ndim == 3:
+        mask = mask[0]
 
-    if isinstance(pred, torch.Tensor):
-        pred = pred.detach().cpu().numpy()
+    pred = pred.detach().cpu().numpy()
+    prob = prob.detach().cpu().numpy()
+
+    if pred.ndim == 3:
+        pred = pred[0]
+
+    if prob.ndim == 3:
+        prob = prob[0]
 
     flair = image[0]
-
-    gt_tumor = (mask > 0).astype(np.float32)
-    pred_tumor = (pred > 0).astype(np.float32)
 
     plt.figure(figsize=(25, 5))
 
@@ -159,25 +157,24 @@ def save_prediction_figure(image, mask, pred, dice, gt_pixels, pred_pixels, save
     plt.axis("off")
 
     plt.subplot(1, 5, 2)
-    plt.imshow(mask, cmap="tab10", vmin=0, vmax=3)
-    plt.title("Ground Truth Multiclass")
+    plt.imshow(mask, cmap="gray")
+    plt.title("Ground Truth")
     plt.axis("off")
 
     plt.subplot(1, 5, 3)
-    plt.imshow(pred, cmap="tab10", vmin=0, vmax=3)
-    plt.title(f"Prediction Multiclass\nBinary Dice={dice:.4f}")
+    plt.imshow(prob, cmap="gray")
+    plt.title("Probability map")
     plt.axis("off")
 
     plt.subplot(1, 5, 4)
-    plt.imshow(flair, cmap="gray")
-    plt.imshow(gt_tumor, alpha=0.4)
-    plt.title("Overlay GT tumor")
+    plt.imshow(pred, cmap="gray")
+    plt.title(f"Prediction\nDice={dice:.4f}")
     plt.axis("off")
 
     plt.subplot(1, 5, 5)
     plt.imshow(flair, cmap="gray")
-    plt.imshow(pred_tumor, alpha=0.4)
-    plt.title("Overlay Pred tumor")
+    plt.imshow(pred, alpha=0.4)
+    plt.title("Overlay prediction")
     plt.axis("off")
 
     plt.suptitle(title)
@@ -215,7 +212,7 @@ def main():
         modalities=["flair", "t1", "t1ce", "t2"],
         only_tumor_slices=False,
         augment=False,
-        segmentation_type="multiclass"
+        segmentation_type="binary"
     )
 
     print("Slices test totals:", len(test_dataset))
@@ -228,33 +225,29 @@ def main():
     )
 
     print("\nCarregant model...")
+    print(f"Checkpoint carregat: {args.model_path}")
+    print(f"Threshold utilitzat: {args.threshold}")
+
     model = create_model(args.architecture, device)
 
     checkpoint = torch.load(args.model_path, map_location=device)
     model.load_state_dict(checkpoint)
     model.eval()
 
-    print("\nCalculant Dice binari per cada slice tumoral del test...")
+    print("\nCalculant Dice per cada slice tumoral del test...")
+
     results = []
 
     with torch.no_grad():
         for idx, (images, masks) in enumerate(test_loader):
             images = images.to(device)
+            masks = masks.to(device)
 
             outputs = model(images)
-            preds = torch.argmax(outputs, dim=1)
+            probs = torch.sigmoid(outputs)
+            preds = (probs > args.threshold).float()
 
-            image = images[0].detach().cpu()
-            mask = masks[0].detach().cpu()
-            pred = preds[0].detach().cpu()
-
-            mask_np = normalize_mask_shape(mask)
-            pred_np = pred.numpy()
-
-            dice, gt_pixels, pred_pixels = binary_dice_from_multiclass(
-                pred=pred_np,
-                mask=mask_np
-            )
+            dice, gt_pixels, pred_pixels = dice_per_slice(preds[0], masks[0])
 
             if gt_pixels <= 0:
                 continue
@@ -264,9 +257,10 @@ def main():
                 "dice": dice,
                 "gt_pixels": gt_pixels,
                 "pred_pixels": pred_pixels,
-                "image": image,
-                "mask": mask,
-                "pred": pred,
+                "image": images[0].detach().cpu(),
+                "mask": masks[0].detach().cpu(),
+                "pred": preds[0].detach().cpu(),
+                "prob": probs[0].detach().cpu(),
             })
 
             if idx % 500 == 0:
@@ -278,6 +272,7 @@ def main():
         raise ValueError("No s'ha trobat cap slice amb tumor real al test set.")
 
     print("\nOrdenant resultats només amb slices tumorals...")
+
     results_sorted = sorted(results, key=lambda x: x["dice"])
 
     n = args.num_each
@@ -296,7 +291,7 @@ def main():
 
     print("\nResum ràpid:")
     print(f"Pitjor Dice: {results_sorted[0]['dice']:.4f}")
-    print(f"Dice mitjà aproximat: {results_sorted[len(results_sorted)//2]['dice']:.4f}")
+    print(f"Dice mitjà aproximat: {results_sorted[len(results_sorted) // 2]['dice']:.4f}")
     print(f"Millor Dice: {results_sorted[-1]['dice']:.4f}")
 
     print("\nGuardant figures...")
@@ -314,18 +309,18 @@ def main():
             title = (
                 f"{group_name.upper()} | "
                 f"idx={item['idx']} | "
-                f"Binary Dice={item['dice']:.4f} | "
+                f"Dice={item['dice']:.4f} | "
                 f"GT pixels={item['gt_pixels']} | "
-                f"Pred pixels={item['pred_pixels']}"
+                f"Pred pixels={item['pred_pixels']} | "
+                f"threshold={args.threshold}"
             )
 
             save_prediction_figure(
                 image=item["image"],
                 mask=item["mask"],
                 pred=item["pred"],
+                prob=item["prob"],
                 dice=item["dice"],
-                gt_pixels=item["gt_pixels"],
-                pred_pixels=item["pred_pixels"],
                 save_path=save_path,
                 title=title
             )
