@@ -462,12 +462,12 @@ if __name__ == "__main__":
         "val_split": 0.1,
     
         # Model
-        "architecture": "unet",
+        "architecture": "resunet",
         "in_channels": 4,
         "out_channels": 1,
     
         # Weighted sampler
-        "use_weighted_sampler": True,
+        "use_weighted_sampler": False,
     
         # Training
         "epochs": 20,
@@ -480,11 +480,11 @@ if __name__ == "__main__":
     
         # Guardar models
         "models_dir": "results/models",
-        "model_name": "unet_binary_4modalities_20epochs_bce_dice_weighted_sampler.pth",
+        "model_name": "resunet_binary_4modalities_20epochs_bce_dice.pth",
     
         # Guardar historial
         "history_dir": "results/history",
-        "history_name": "unet_binary_4modalities_20epochs_bce_dice_weighted_sampler_history.json",
+        "history_name": "resunet_binary_4modalities_20epochs_bce_dice_history.json",
     
         # Wandb
         "wandb_project": "deep-learning-14",
