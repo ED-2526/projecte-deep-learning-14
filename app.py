@@ -317,8 +317,12 @@ if st.session_state.get("prediction_ready") and st.session_state.get("pred_mode"
                     f'<span style="color:{color};font-weight:bold">■</span> **{cls_name}**: `{pct:.1f}%`',
                     unsafe_allow_html=True,
                 )
-                bar_val = min(pct / 100 * (4 if cls_id != 0 else 1.2), 1.0)
-                st.progress(bar_val)
+                st.markdown(
+                    f'<div style="background:#e8e8e8;border-radius:4px;height:20px;overflow:hidden">'
+                    f'<div style="background:{color};height:100%;width:{pct}%;"></div>'
+                    f'</div>',
+                    unsafe_allow_html=True,
+                )
 
     with col_params:
         st.subheader("Hiperparàmetres del model")
